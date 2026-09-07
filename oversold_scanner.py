@@ -32,6 +32,7 @@ TICKERS = [
 ]
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN_HERE")
+# One id, or several separated by commas: "123456789,-1001234567890,@mychannel"
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID_HERE")
 
 SMA_LEN = 20
@@ -135,18 +136,53 @@ def check_ticker(ticker: str):
     return None
 
 
+def _mask(value: str) -> str:
+    """Show just enough of an id/token to compare it, without leaking it."""
+    value = str(value)
+    return f"...{value[-4:]} (len {len(value)})" if len(value) > 4 else "(too short/empty)"
+
+
 def send_telegram(message: str) -> None:
+    """Send the alert and log where it actually landed.
+
+    Telegram answering 200 does not mean the message reached the chat you
+    expected - it means it reached the chat matching TELEGRAM_CHAT_ID. Logging
+    the chat id it echoes back is what makes a misconfigured id visible.
+    """
+    if TELEGRAM_TOKEN.startswith("YOUR_") or str(TELEGRAM_CHAT_ID).startswith("YOUR_"):
+        print("Telegram not configured: TELEGRAM_TOKEN / TELEGRAM_CHAT_ID are placeholders")
+        return
+
+    recipients = [c.strip() for c in str(TELEGRAM_CHAT_ID).split(",") if c.strip()]
+    if not recipients:
+        print("Telegram not configured: TELEGRAM_CHAT_ID is empty")
+        return
+
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    try:
-        resp = requests.post(
-            url,
-            data={"chat_id": TELEGRAM_CHAT_ID, "text": message},
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            print(f"Telegram send failed [{resp.status_code}]: {resp.text}")
-    except Exception as exc:
-        print(f"Telegram send failed: {exc}")
+    print(f"Sending to {len(recipients)} recipient(s) with token {_mask(TELEGRAM_TOKEN)}")
+
+    for chat_id in recipients:
+        # One bad recipient must not stop the others.
+        try:
+            resp = requests.post(
+                url,
+                data={"chat_id": chat_id, "text": message},
+                timeout=15,
+            )
+            if resp.status_code != 200:
+                print(f"  {_mask(chat_id)} FAILED [{resp.status_code}]: {resp.text}")
+                continue
+
+            result = resp.json().get("result", {})
+            chat = result.get("chat", {})
+            print(
+                f"  {_mask(chat_id)} OK: message_id={result.get('message_id')} "
+                f"-> chat id {_mask(chat.get('id', ''))} "
+                f"type={chat.get('type')} "
+                f"name={chat.get('first_name') or chat.get('title') or '(none)'}"
+            )
+        except Exception as exc:
+            print(f"  {_mask(chat_id)} FAILED: {exc}")
 
 
 def main() -> None:
