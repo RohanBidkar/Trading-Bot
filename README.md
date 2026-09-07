@@ -13,8 +13,10 @@ Two pieces, deployed independently:
 
 ## Strategy logic
 
-Daily timeframe, evaluated on the most recent completed bar. A ticker is a
-match when **all three** are true:
+Two independent setups run on the most recent completed daily bar. A ticker
+matching either one is reported; matching both puts it in both tables.
+
+**Setup A — Below SMA20.** All three must hold:
 
 1. `Close < SMA20` — trading below the 20-day simple moving average
 2. Far enough below that average, **scaled by share price**:
@@ -22,14 +24,36 @@ match when **all three** are true:
    - Close ≤ $100 → at least **4%** below SMA20
 3. `RSI(14) <= 40` — momentum is weak, not just the price
 
+**Setup B — Sharp drop.** A single condition, independent of the SMA and RSI:
+
+- `Close` is **10% or more below** where it was **10 trading days** ago
+
+Setup B catches fast selloffs that Setup A can miss — a stock can fall hard and
+still sit near its 20-day average if the drop is recent enough.
+
 The price tier exists because higher-priced names move more in dollar terms; a
 4% dip on a $150 stock is ordinary noise, while on a $30 stock it is a real
 move. The cutoff is exclusive — exactly $100.00 falls in the 4% tier.
 
-Constants live at the top of `oversold_scanner.py` (`SMA_LEN`, `RSI_LEN`,
-`PRICE_TIER`, `PCT_DROP_ABOVE_TIER`, `PCT_DROP_BELOW_TIER`, `RSI_THRESHOLD`)
-if you want to tune them. Set both tier percentages to the same value to go
-back to a single flat threshold.
+Constants live at the top of `oversold_scanner.py` — `SMA_LEN`, `RSI_LEN`,
+`PRICE_TIER`, `PCT_DROP_ABOVE_TIER`, `PCT_DROP_BELOW_TIER`, `RSI_THRESHOLD`
+for Setup A, and `DROP_LOOKBACK` / `DROP_THRESHOLD` for Setup B. Set both tier
+percentages to the same value to go back to a single flat threshold.
+
+### Alert format
+
+Matches are sent as fixed-width tables, most stretched first, wrapped in
+Telegram `<pre>` blocks so the columns stay aligned in a monospace font:
+
+```
+STK       CLOSE    DIFF    SMA20    RSI
+---------------------------------------
+JBSS      72.43   -7.4%    78.21   32.0
+```
+
+The second column is `DIFF` (% versus SMA20) in the Setup A table and `D10`
+(% over the last 10 sessions) in the Setup B table. A message is sent only when
+at least one setup has a match.
 
 Data source is yfinance, ~6 months of daily bars per ticker (enough history to
 warm up both a 20-bar SMA and a 14-bar RSI). Each ticker is wrapped in its own

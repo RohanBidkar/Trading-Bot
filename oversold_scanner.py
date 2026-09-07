@@ -1,22 +1,27 @@
 """
-Daily SMA20 Oversold Scanner
-----------------------------
-Strategy (daily timeframe):
-  - Close < SMA20
-  - Close is far enough below SMA20, scaled by price:
-      * price > $100  -> at least 5% below
-      * price <= $100 -> at least 4% below
-  - RSI(14) <= 40
+Daily Oversold Scanner
+----------------------
+Two independent setups, evaluated on the most recent completed daily bar:
 
-All calculations use raw (unadjusted) Close, so the SMA/RSI values match what
-a standard charting platform displays. See the README for the tradeoff versus
-Adjusted Close around ex-dividend dates.
+  A. Below SMA20
+       - Close < SMA20
+       - Close far enough below SMA20, scaled by price:
+           * price > $100  -> at least 5% below
+           * price <= $100 -> at least 4% below
+       - RSI(14) <= 40
+
+  B. Sharp drop
+       - Close is >= 10% below where it was 10 trading days ago
+
+A ticker matching either setup is reported; one matching both appears in both
+tables. All calculations use raw (unadjusted) Close so the numbers line up with
+a standard charting platform.
 
 Free stack: yfinance (prices) + Telegram Bot API (alerts).
-Run once a day via cron / Task Scheduler / GitHub Actions.
 """
 
 import os
+from html import escape
 
 import pandas as pd
 import requests
@@ -37,12 +42,17 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID_HERE")
 
 SMA_LEN = 20
 RSI_LEN = 14
-# Distance below SMA20 required, tiered by share price. Higher-priced names
-# swing more in dollar terms, so they need a deeper pullback to qualify.
+
+# Setup A: distance below SMA20, tiered by share price.
 PRICE_TIER = 100.0          # dollar cutoff between the two tiers
 PCT_DROP_ABOVE_TIER = -5.0  # applies when close > PRICE_TIER
 PCT_DROP_BELOW_TIER = -4.0  # applies when close <= PRICE_TIER
 RSI_THRESHOLD = 40
+
+# Setup B: sharp recent drop, independent of the SMA.
+DROP_LOOKBACK = 10          # trading days to look back
+DROP_THRESHOLD = -10.0      # percent change over that window
+
 LOOKBACK = "6mo"
 # -----------------------------------------
 
@@ -101,42 +111,80 @@ def get_close(ticker: str) -> pd.Series:
     return df["Close"].dropna()
 
 
-def check_ticker(ticker: str):
-    """Return an alert line if the ticker meets the setup, else None."""
+def evaluate(ticker: str):
+    """Return a dict of the metrics for one ticker, or None if unusable."""
     prices = get_close(ticker)
-    if len(prices) < SMA_LEN + RSI_LEN:
+
+    needed = max(SMA_LEN + RSI_LEN, DROP_LOOKBACK + 1)
+    if len(prices) < needed:
         print(f"Skipping {ticker}: only {len(prices)} bars of history")
         return None
 
-    sma = prices.rolling(SMA_LEN).mean()
-    rsi = compute_rsi(prices, RSI_LEN)
-
     close = float(prices.iloc[-1])
-    last_sma = float(sma.iloc[-1])
-    last_rsi = float(rsi.iloc[-1])
+    sma = float(prices.rolling(SMA_LEN).mean().iloc[-1])
+    rsi = float(compute_rsi(prices, RSI_LEN).iloc[-1])
+    past = float(prices.iloc[-(DROP_LOOKBACK + 1)])
 
-    if pd.isna(last_sma) or pd.isna(last_rsi) or last_sma == 0:
+    if pd.isna(sma) or pd.isna(rsi) or sma == 0 or past == 0:
         print(f"Skipping {ticker}: indicators not ready")
         return None
 
-    pct_from_sma = (close - last_sma) / last_sma * 100.0
-    required_drop = threshold_for(close)
+    return {
+        "ticker": ticker,
+        "close": close,
+        "sma": sma,
+        "rsi": rsi,
+        "diff": (close - sma) / sma * 100.0,      # % vs SMA20
+        "drop": (close - past) / past * 100.0,    # % over DROP_LOOKBACK days
+        "needs": threshold_for(close),
+    }
 
-    if (
-        close < last_sma
-        and pct_from_sma <= required_drop
-        and last_rsi <= RSI_THRESHOLD
-    ):
-        return (
-            f"{ticker}: Close={close:.2f} | "
-            f"{pct_from_sma:.1f}% vs SMA20 ({last_sma:.2f}) "
-            f"[needs {required_drop:.0f}%] | "
-            f"RSI={last_rsi:.1f}"
+
+def is_below_sma_setup(m: dict) -> bool:
+    """Setup A: stretched below SMA20 with weak momentum."""
+    return m["close"] < m["sma"] and m["diff"] <= m["needs"] and m["rsi"] <= RSI_THRESHOLD
+
+
+def is_sharp_drop_setup(m: dict) -> bool:
+    """Setup B: down hard over the recent window, regardless of the SMA."""
+    return m["drop"] <= DROP_THRESHOLD
+
+
+def format_table(rows: list, second_col: str) -> str:
+    """Fixed-width table. `second_col` is 'DIFF' (vs SMA20) or 'D10' (drop)."""
+    key = "diff" if second_col == "DIFF" else "drop"
+    header = f"{'STK':<6}{'CLOSE':>9}{second_col:>8}{'SMA20':>9}{'RSI':>7}"
+    lines = [header, "-" * len(header)]
+    for m in rows:
+        lines.append(
+            f"{m['ticker']:<6}"
+            f"{m['close']:>9.2f}"
+            f"{m[key]:>7.1f}%"
+            f"{m['sma']:>9.2f}"
+            f"{m['rsi']:>7.1f}"
         )
-    return None
+    return "\n".join(lines)
 
 
-def _mask(value: str) -> str:
+def build_message(below_sma: list, sharp_drop: list) -> str:
+    """Telegram HTML. <pre> keeps the columns aligned in a monospace font."""
+    parts = []
+    if below_sma:
+        parts.append(
+            f"\U0001F4C9 <b>Below SMA{SMA_LEN}</b> "
+            f"(RSI≤{RSI_THRESHOLD}, {abs(PCT_DROP_BELOW_TIER):.0f}% "
+            f"/ {abs(PCT_DROP_ABOVE_TIER):.0f}% over ${PRICE_TIER:.0f})\n"
+            f"<pre>{escape(format_table(below_sma, 'DIFF'))}</pre>"
+        )
+    if sharp_drop:
+        parts.append(
+            f"⚡ <b>Down {abs(DROP_THRESHOLD):.0f}%+ in {DROP_LOOKBACK} days</b>\n"
+            f"<pre>{escape(format_table(sharp_drop, 'D10'))}</pre>"
+        )
+    return "\n\n".join(parts)
+
+
+def _mask(value) -> str:
     """Show just enough of an id/token to compare it, without leaking it."""
     value = str(value)
     return f"...{value[-4:]} (len {len(value)})" if len(value) > 4 else "(too short/empty)"
@@ -166,7 +214,7 @@ def send_telegram(message: str) -> None:
         try:
             resp = requests.post(
                 url,
-                data={"chat_id": chat_id, "text": message},
+                data={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
                 timeout=15,
             )
             if resp.status_code != 200:
@@ -186,21 +234,36 @@ def send_telegram(message: str) -> None:
 
 
 def main() -> None:
-    hits = []
+    below_sma, sharp_drop = [], []
+
     for ticker in TICKERS:
         try:
-            result = check_ticker(ticker)
-            if result:
-                hits.append(result)
+            metrics = evaluate(ticker)
+            if metrics is None:
+                continue
+            if is_below_sma_setup(metrics):
+                below_sma.append(metrics)
+            if is_sharp_drop_setup(metrics):
+                sharp_drop.append(metrics)
         except Exception as exc:
             print(f"Error checking {ticker}: {exc}")
 
-    if hits:
-        message = "\U0001F4C9 Oversold Setup Alerts:\n" + "\n".join(hits)
-        print(message)
-        send_telegram(message)
-    else:
+    # Most stretched first in each table.
+    below_sma.sort(key=lambda m: m["diff"])
+    sharp_drop.sort(key=lambda m: m["drop"])
+
+    if not below_sma and not sharp_drop:
         print("No matches today.")
+        return
+
+    if below_sma:
+        print(f"\nBelow SMA{SMA_LEN}:")
+        print(format_table(below_sma, "DIFF"))
+    if sharp_drop:
+        print(f"\nDown {abs(DROP_THRESHOLD):.0f}%+ in {DROP_LOOKBACK} days:")
+        print(format_table(sharp_drop, "D10"))
+
+    send_telegram(build_message(below_sma, sharp_drop))
 
 
 if __name__ == "__main__":
