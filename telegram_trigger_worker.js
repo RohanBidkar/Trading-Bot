@@ -12,6 +12,7 @@
  *   GITHUB_OWNER           e.g. "your-github-username"
  *   GITHUB_REPO            e.g. "alert-bot"
  *   GITHUB_BRANCH          e.g. "main"
+ *  commit 
  */
 
 const WORKFLOW_FILE = "daily_scan.yml";
