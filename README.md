@@ -24,7 +24,7 @@ ticker matching both appears in both tables.
 **Setup A — Below SMA20.** All three must hold:
 
 1. `Close < SMA20`
-2. Far enough below, **scaled by share price**: > $100 needs **5%**, ≤ $100 needs **4%**
+2. Far enough below, **scaled by share price**: > $100 needs **4%**, ≤ $100 needs **3%**
 3. `RSI(14) <= 40`
 
 **Setup B — Sharp drop.** One condition, independent of SMA and RSI:
@@ -38,7 +38,7 @@ The exact mirror:
 **Setup C — Above SMA20.**
 
 1. `Close > SMA20`
-2. Far enough above: > $100 needs **+5%**, ≤ $100 needs **+4%**
+2. Far enough above: > $100 needs **+4%**, ≤ $100 needs **+3%**
 3. `RSI(14) >= 60`
 
 **Setup D — Sharp rise.**
@@ -50,8 +50,8 @@ run hard and still sit near its 20-day average, because the average has not
 caught up yet.
 
 The price tier exists because higher-priced names move more in dollar terms; a
-4% move on a $150 stock is ordinary noise, while on a $30 stock it is real. The
-cutoff is exclusive — exactly $100.00 falls in the 4% tier.
+3% move on a $150 stock is ordinary noise, while on a $30 stock it is real. The
+cutoff is exclusive — exactly $100.00 falls in the lower (3%) tier.
 
 Thresholds live at the top of each scanner (`PCT_DROP_*` / `RSI_OVERSOLD` /
 `DROP_THRESHOLD`, and `PCT_RISE_*` / `RSI_OVERBOUGHT` / `RISE_THRESHOLD`).

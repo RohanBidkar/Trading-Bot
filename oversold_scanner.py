@@ -3,7 +3,7 @@ Oversold (long-side) scanner.
 
 Setup A - Below SMA20:
   - Close < SMA20
-  - far enough below, scaled by price: >$100 needs 5%, <=$100 needs 4%
+  - far enough below, scaled by price: >$100 needs 4%, <=$100 needs 3%
   - RSI(14) <= 40
 
 Setup B - Sharp drop:
@@ -18,8 +18,8 @@ Usage:
 from scanner_core import SMA_LEN, Setup, run, tier_threshold
 
 # ---------------- CONFIG ----------------
-PCT_DROP_ABOVE_TIER = -5.0   # close > $100 must be this far below SMA20
-PCT_DROP_BELOW_TIER = -4.0   # close <= $100 must be this far below SMA20
+PCT_DROP_ABOVE_TIER = -4.0   # close > $100 must be this far below SMA20
+PCT_DROP_BELOW_TIER = -3.0   # close <= $100 must be this far below SMA20
 RSI_OVERSOLD = 40
 DROP_THRESHOLD = -10.0       # % over the 10-day window
 # -----------------------------------------

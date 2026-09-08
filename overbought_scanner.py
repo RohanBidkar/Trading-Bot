@@ -3,7 +3,7 @@ Overbought (short-side) scanner - the mirror of oversold_scanner.py.
 
 Setup C - Above SMA20:
   - Close > SMA20
-  - far enough above, scaled by price: >$100 needs 5%, <=$100 needs 4%
+  - far enough above, scaled by price: >$100 needs 4%, <=$100 needs 3%
   - RSI(14) >= 60
 
 Setup D - Sharp rise:
@@ -18,8 +18,8 @@ Usage:
 from scanner_core import SMA_LEN, Setup, run, tier_threshold
 
 # ---------------- CONFIG ----------------
-PCT_RISE_ABOVE_TIER = 5.0    # close > $100 must be this far above SMA20
-PCT_RISE_BELOW_TIER = 4.0    # close <= $100 must be this far above SMA20
+PCT_RISE_ABOVE_TIER = 4.0    # close > $100 must be this far above SMA20
+PCT_RISE_BELOW_TIER = 3.0    # close <= $100 must be this far above SMA20
 RSI_OVERBOUGHT = 60
 RISE_THRESHOLD = 10.0        # % over the 10-day window
 # -----------------------------------------
