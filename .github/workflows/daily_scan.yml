@@ -2,16 +2,34 @@ name: Daily Oversold Scan
 
 on:
   schedule:
-    # 21:30 UTC, Mon-Fri = 16:30 ET (EDT) / 17:30 ET is 22:30 UTC in winter.
-    # GitHub cron is always UTC, so this runs 4:30pm ET during daylight saving
-    # and 5:30pm ET (still after the close) during standard time.
+    # 21:30 UTC, Mon-Fri = 16:30 ET (EDT) / 17:30 ET in winter. GitHub cron is
+    # always UTC, so both land after the 4:00pm ET close.
     - cron: "30 21 * * 1-5"
   workflow_dispatch:
+    inputs:
+      scan:
+        description: "Which scan to run"
+        type: choice
+        default: both
+        options:
+          - both
+          - oversold
+          - overbought
+      as_of:
+        description: "Scan a past session (YYYY-MM-DD). Blank = latest bar."
+        type: string
+        required: false
+        default: ""
+
+env:
+  # Scheduled runs have no inputs, so default them to "both" / latest bar.
+  SCAN: ${{ github.event.inputs.scan || 'both' }}
+  AS_OF: ${{ github.event.inputs.as_of || '' }}
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
@@ -29,7 +47,29 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run oversold scanner
+        if: env.SCAN == 'both' || env.SCAN == 'oversold'
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python oversold_scanner.py
+        # AS_OF is passed through the environment and quoted, never
+        # interpolated into the shell line, so a hostile input cannot escape.
+        run: |
+          if [ -n "$AS_OF" ]; then
+            python oversold_scanner.py --as-of "$AS_OF" --send
+          else
+            python oversold_scanner.py
+          fi
+
+      - name: Run overbought scanner
+        if: env.SCAN == 'both' || env.SCAN == 'overbought'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        # AS_OF is passed through the environment and quoted, never
+        # interpolated into the shell line, so a hostile input cannot escape.
+        run: |
+          if [ -n "$AS_OF" ]; then
+            python overbought_scanner.py --as-of "$AS_OF" --send
+          else
+            python overbought_scanner.py
+          fi

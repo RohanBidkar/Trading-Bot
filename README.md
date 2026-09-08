@@ -1,44 +1,67 @@
-# Oversold Scanner → Telegram
+# Stock Scanner → Telegram
 
-A free, automated daily scanner for US bank/regional-bank stocks (plus a few
-ETFs). It checks every ticker after the US close and sends a single Telegram
-message listing any that are stretched below their 20-day moving average.
-
-Two pieces, deployed independently:
+Two automated daily scanners for US regional-bank stocks (plus a few ETFs).
+After the US close they check every ticker and send Telegram alerts: an
+**oversold** (long-side) scan and an **overbought** (short-side) scan. Both run
+automatically on a schedule, and either can be triggered on demand from a
+Telegram button.
 
 | Piece | Where it runs | What it does |
 | --- | --- | --- |
-| `oversold_scanner.py` | GitHub Actions (cron) | Pulls prices, evaluates the setup, sends the alert |
-| `telegram_trigger_worker.js` | Cloudflare Workers | Lets you type `/scan` in Telegram to run it on demand |
+| `scanner_core.py` | — | Shared data fetch, indicators, tables, Telegram send |
+| `oversold_scanner.py` | GitHub Actions | Long-side screen |
+| `overbought_scanner.py` | GitHub Actions | Short-side screen |
+| `telegram_trigger_worker.js` | Cloudflare Workers | Telegram menu to run either on demand |
 
 ## Strategy logic
 
-Two independent setups run on the most recent completed daily bar. A ticker
-matching either one is reported; matching both puts it in both tables.
+Four setups across two scripts, all evaluated on the most recent completed
+daily bar. Each script reports any ticker matching either of its setups; a
+ticker matching both appears in both tables.
+
+### Oversold — `oversold_scanner.py`
 
 **Setup A — Below SMA20.** All three must hold:
 
-1. `Close < SMA20` — trading below the 20-day simple moving average
-2. Far enough below that average, **scaled by share price**:
-   - Close > $100 → at least **5%** below SMA20
-   - Close ≤ $100 → at least **4%** below SMA20
-3. `RSI(14) <= 40` — momentum is weak, not just the price
+1. `Close < SMA20`
+2. Far enough below, **scaled by share price**: > $100 needs **5%**, ≤ $100 needs **4%**
+3. `RSI(14) <= 40`
 
-**Setup B — Sharp drop.** A single condition, independent of the SMA and RSI:
+**Setup B — Sharp drop.** One condition, independent of SMA and RSI:
 
-- `Close` is **10% or more below** where it was **10 trading days** ago
+- `Close` is **10%+ below** where it was **10 trading days** ago
 
-Setup B catches fast selloffs that Setup A can miss — a stock can fall hard and
-still sit near its 20-day average if the drop is recent enough.
+### Overbought — `overbought_scanner.py`
+
+The exact mirror:
+
+**Setup C — Above SMA20.**
+
+1. `Close > SMA20`
+2. Far enough above: > $100 needs **+5%**, ≤ $100 needs **+4%**
+3. `RSI(14) >= 60`
+
+**Setup D — Sharp rise.**
+
+- `Close` is **10%+ above** where it was **10 trading days** ago
+
+The sharp-move setups catch fast moves that the SMA setups miss — a stock can
+run hard and still sit near its 20-day average, because the average has not
+caught up yet.
 
 The price tier exists because higher-priced names move more in dollar terms; a
-4% dip on a $150 stock is ordinary noise, while on a $30 stock it is a real
-move. The cutoff is exclusive — exactly $100.00 falls in the 4% tier.
+4% move on a $150 stock is ordinary noise, while on a $30 stock it is real. The
+cutoff is exclusive — exactly $100.00 falls in the 4% tier.
 
-Constants live at the top of `oversold_scanner.py` — `SMA_LEN`, `RSI_LEN`,
-`PRICE_TIER`, `PCT_DROP_ABOVE_TIER`, `PCT_DROP_BELOW_TIER`, `RSI_THRESHOLD`
-for Setup A, and `DROP_LOOKBACK` / `DROP_THRESHOLD` for Setup B. Set both tier
-percentages to the same value to go back to a single flat threshold.
+Thresholds live at the top of each scanner (`PCT_DROP_*` / `RSI_OVERSOLD` /
+`DROP_THRESHOLD`, and `PCT_RISE_*` / `RSI_OVERBOUGHT` / `RISE_THRESHOLD`).
+Shared settings — `TICKERS`, `SMA_LEN`, `RSI_LEN`, `PRICE_TIER`,
+`MOVE_LOOKBACK` — live in `scanner_core.py`.
+
+Note the two sides are not symmetric in practice. On this list the binding
+constraint for the short side is the **distance** requirement, not RSI: these
+banks rarely extend 4–5% above their 20-day average, so Setup C fires less
+often than you might expect.
 
 ### Alert format
 
@@ -97,7 +120,7 @@ smoothing** — an EMA with `alpha = 1/14`, via
 and StockCharts. A plain `rolling(14).mean()` is a different (and less
 standard) indicator that will disagree with your charts.
 
-## Local setup and a single test run
+## Local setup and a test run
 
 ```bash
 python3 -m venv .venv
@@ -105,9 +128,8 @@ source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-Set the two environment variables (the script falls back to obvious
-placeholder strings if you skip this — it will run and print matches, but the
-Telegram send will fail):
+Requires Python 3.11+ (`pandas` 3.x). Set the two environment variables — the
+scripts fall back to obvious placeholders and refuse to send if unset:
 
 ```bash
 cp .env.example .env               # then fill in real values
@@ -115,27 +137,47 @@ export TELEGRAM_TOKEN="123456789:AAExample..."
 export TELEGRAM_CHAT_ID="987654321"
 ```
 
-- **`TELEGRAM_TOKEN`** — create a bot with [@BotFather](https://t.me/BotFather)
-  (`/newbot`) and copy the token it gives you.
-- **`TELEGRAM_CHAT_ID`** — message [@userinfobot](https://t.me/userinfobot); it
-  replies with your numeric id. Send your own bot a message once first, or it
-  is not allowed to message you.
+- **`TELEGRAM_TOKEN`** — create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`)
+- **`TELEGRAM_CHAT_ID`** — message [@userinfobot](https://t.me/userinfobot) for your numeric id.
+  Send your bot a message first, or it is not allowed to message you.
+  Several recipients can be comma-separated: `123456789,-1001234567890,@mychannel`
 
-Run it once:
+Run either scanner:
 
 ```bash
 python oversold_scanner.py
+python overbought_scanner.py
 ```
 
-You will see either the alert text (also sent to Telegram) or
-`No matches today.`
+### Running as of an earlier date
+
+Both scripts take `--as-of` to reproduce what they would have printed on a past
+trading day. A weekend or holiday rolls back to the previous session:
+
+```bash
+python oversold_scanner.py --as-of 2026-09-01
+python oversold_scanner.py --as-of 2026-09-01 --send   # also push to Telegram
+```
+
+Historical runs print only by default — `--send` is required to deliver one, so
+a backtest cannot accidentally spam your alerts.
+
+Two caveats. It is **point-in-time on today's ticker list**, so anything
+delisted or acquired is missing and results are survivorship-biased — fine for
+spot checks, not a real backtest. And enough history must precede the target
+date; `--as-of` automatically widens the download to 2 years, which covers most
+of what you would want.
 
 ## Deploy the GitHub Actions workflow
 
 `.github/workflows/daily_scan.yml` runs at **21:30 UTC, Mon–Fri** — 4:30pm ET
 during daylight saving, 5:30pm ET in winter (GitHub cron is always UTC, and
-both are after the 4:00pm ET close). It also supports **workflow_dispatch**, so
-you can run it by hand from the Actions tab.
+both are after the 4:00pm ET close). Scheduled runs execute **both** scanners,
+which send two separate Telegram messages.
+
+It also supports **workflow_dispatch** with a `scan` input — `both` (default),
+`oversold`, or `overbought` — so you can run one side by hand from the Actions
+tab, or from the Telegram menu via the Worker.
 
 After pushing the repo:
 
@@ -151,8 +193,55 @@ days, and scheduled runs can be delayed by several minutes at busy times.
 ## Deploy the Cloudflare Worker (separate deploy)
 
 The worker is standalone — it is not part of the GitHub Actions deploy. It
-receives the Telegram webhook and dispatches the workflow so `/scan` runs the
-scanner on demand.
+receives the Telegram webhook and dispatches the workflow so you can run a scan
+on demand.
+
+Telegram commands:
+
+| Command | Runs |
+| --- | --- |
+| `/start` or `/menu` | Shows inline buttons: 📉 Oversold, 📈 Overbought, 🔀 Both |
+| `/scan` or `/oversold` | Oversold scan on the latest bar |
+| `/short` or `/overbought` | Overbought scan on the latest bar |
+| `/both` | Both |
+| `/scan 2026-09-01` | Oversold scan **as of that session** |
+| `/short 2026-09-01` | Overbought scan as of that session |
+| `/both 2026-09-01` | Both, as of that session |
+
+Anything else gets a one-line usage hint.
+
+### Picking a date from a calendar
+
+`/start` → **📅 Pick a date** → choose a side → a month grid appears in the
+chat:
+
+```
+      ◀   September 2026
+   Mo  Tu  We  Th  Fr  Sa  Su
+        1   2   3   4   ·   ·
+    7   8   ·   ·   ·   ·   ·
+```
+
+`◀ ▶` redraw the same message a month at a time; tapping a day dispatches the
+scan for that session. Weekends and future dates render as an inert `·`, and
+navigation stops at 24 months back — matching `LOOKBACK_HISTORICAL` in
+`scanner_core.py`, beyond which there is not enough history to warm up SMA20.
+Market holidays stay selectable because the scanner rolls back to the previous
+session anyway.
+
+It is built entirely from inline keyboards, so there is no extra hosted page
+and it works in groups. Everything routes through `callback_data` (`run:`,
+`cal:`, `nav:`, `day:`, `noop`), which stays well inside Telegram's 64-byte
+limit.
+
+The date is validated in the Worker before it goes anywhere: exact
+`YYYY-MM-DD`, a real calendar date, and not in the future. Bad input gets a
+reply explaining the format rather than a dispatch. The workflow then passes it
+to the script through an `env:` variable, quoted — never interpolated into the
+shell line — so a hostile input cannot escape into the runner.
+
+A backdated scan is delivered to every id in `TELEGRAM_CHAT_ID`, not only the
+person who asked.
 
 ```bash
 npm install -g wrangler
@@ -199,11 +288,15 @@ default branch — push the repo before testing the worker.
 ## Repo layout
 
 ```
-oversold_scanner.py              # the scanner
+scanner_core.py                  # shared: fetch, indicators, tables, Telegram
+oversold_scanner.py              # long-side setups (A + B)
+overbought_scanner.py            # short-side setups (C + D)
 requirements.txt                 # pinned yfinance / pandas / requests
-.github/workflows/daily_scan.yml # daily cron + manual trigger
-telegram_trigger_worker.js       # Cloudflare Worker for /scan
+.github/workflows/daily_scan.yml # daily cron + manual trigger with scan input
+telegram_trigger_worker.js       # Cloudflare Worker: Telegram menu -> dispatch
+set_webhook.py                   # one-time helper to register the webhook
 .env.example                     # variables to fill in locally
+wrangler.jsonc                   # Worker deploy config
 ```
 
 ## Disclaimer
