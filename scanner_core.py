@@ -30,6 +30,12 @@ TICKERS = [
     "PFBC", "QCRH", "RRBI", "UMBF", "WTFC", "DPST", "KRE", "HOV",
 ]
 
+# Send a "no matches" message too, so a scan never ends in silence. Set to
+# 0/false to go back to alert-only delivery (useful for the daily cron).
+NOTIFY_WHEN_EMPTY = os.environ.get("NOTIFY_WHEN_EMPTY", "1").strip().lower() not in (
+    "0", "false", "no", "off", "",
+)
+
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN_HERE")
 # One id, or several separated by commas: "123456789,-1001234567890,@mychannel"
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID_HERE")
@@ -239,30 +245,39 @@ def run(name: str, setups: list) -> None:
 
     if not metrics:
         print("No usable data for any ticker.")
+        if NOTIFY_WHEN_EMPTY and not (as_of and not args.send):
+            send_telegram(
+                f"⚠️ <b>{escape(name)}</b> — no usable price data for any ticker. "
+                "The data source may be down."
+            )
         return
 
     bar_date = max(m["date"] for m in metrics)
     header = f"<b>{escape(name)}</b> — bar {bar_date}"
     print(f"\n{name} — bar {bar_date}")
 
-    sections, printed = [], False
+    sections = []
     for setup in setups:
         rows = [m for m in metrics if setup.predicate(m)]
         rows.sort(key=lambda m: m[setup.key], reverse=setup.descending)
         if not rows:
             continue
-        printed = True
         table = format_table(rows, setup)
         print(f"\n{plain(setup.title)}")
         print(table)
         sections.append(f"{setup.title}\n<pre>{escape(table)}</pre>")
 
-    if not printed:
+    if sections:
+        body = header + "\n\n" + "\n\n".join(sections)
+    else:
         print("No matches.")
-        return
+        if not NOTIFY_WHEN_EMPTY:
+            return
+        # Say so explicitly - silence is indistinguishable from a broken run.
+        body = f"{header}\n\nNo matches — {len(metrics)} tickers scanned."
 
     if as_of and not args.send:
         print("\n(--as-of set without --send: not sending to Telegram)")
         return
 
-    send_telegram(header + "\n\n" + "\n\n".join(sections))
+    send_telegram(body)

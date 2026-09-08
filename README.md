@@ -74,9 +74,22 @@ STK       CLOSE    DIFF    SMA20    RSI
 JBSS      72.43   -7.4%    78.21   32.0
 ```
 
-The second column is `DIFF` (% versus SMA20) in the Setup A table and `D10`
-(% over the last 10 sessions) in the Setup B table. A message is sent only when
-at least one setup has a match.
+The second column is `DIFF` (% versus SMA20) in the SMA tables and `D10`
+(% over the last 10 sessions) in the sharp-move tables.
+
+**Every run reports back**, including quiet ones:
+
+```
+Overbought scan — bar 2026-09-08
+
+No matches — 44 tickers scanned.
+```
+
+Silence is indistinguishable from a broken run, so an empty scan says so
+explicitly. Set `NOTIFY_WHEN_EMPTY=0` in the environment to go back to
+alert-only delivery — useful on the scheduled run if two "no matches" messages
+a day become noise, while on-demand scans keep confirming they worked. A run
+that cannot fetch any data at all sends a distinct ⚠️ warning instead.
 
 Data source is yfinance, ~6 months of daily bars per ticker (enough history to
 warm up both a 20-bar SMA and a 14-bar RSI). Each ticker is wrapped in its own
