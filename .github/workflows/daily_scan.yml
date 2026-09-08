@@ -1,4 +1,4 @@
-name: Daily Oversold Scan
+name: Daily Stock Scan
 
 on:
   schedule:
