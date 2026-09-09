@@ -15,8 +15,14 @@ on:
           - both
           - oversold
           - overbought
+          - first5
       as_of:
         description: "Scan a past session (YYYY-MM-DD). Blank = latest bar."
+        type: string
+        required: false
+        default: ""
+      month:
+        description: "first5 only - which month (YYYY-MM). Blank = latest complete window."
         type: string
         required: false
         default: ""
@@ -25,6 +31,7 @@ env:
   # Scheduled runs have no inputs, so default them to "both" / latest bar.
   SCAN: ${{ github.event.inputs.scan || 'both' }}
   AS_OF: ${{ github.event.inputs.as_of || '' }}
+  MONTH: ${{ github.event.inputs.month || '' }}
 
 jobs:
   scan:
@@ -72,4 +79,19 @@ jobs:
             python overbought_scanner.py --as-of "$AS_OF" --send
           else
             python overbought_scanner.py
+          fi
+
+      - name: Run first-five-days scanner
+        # Only on request - "both" stays the oversold/overbought pair.
+        if: env.SCAN == 'first5'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        # MONTH is passed through the environment and quoted, never
+        # interpolated into the shell line, so a hostile input cannot escape.
+        run: |
+          if [ -n "$MONTH" ]; then
+            python first_five_scanner.py --month "$MONTH" --send
+          else
+            python first_five_scanner.py
           fi

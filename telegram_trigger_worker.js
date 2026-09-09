@@ -11,6 +11,9 @@
  *   /short [YYYY-MM-DD]    overbought (short side)
  *   /both [YYYY-MM-DD]     run both
  *
+ * The /start menu also offers "First 5 days": how every ticker did over the
+ * opening sessions of a month, chosen from a month grid.
+ *
  * Required environment variables / secrets:
  *   TELEGRAM_TOKEN         bot token from @BotFather (used to reply)
  *   TELEGRAM_SECRET_TOKEN  the secret_token you passed to setWebhook
@@ -26,6 +29,7 @@ const LABELS = {
   oversold: "📉 Oversold",
   overbought: "📈 Overbought",
   both: "🔀 Both",
+  first5: "🗓 First 5 days",
 };
 
 // How far back the calendar will navigate. Matches LOOKBACK_HISTORICAL ("2y")
@@ -54,6 +58,7 @@ const MAIN_MENU = {
     ],
     [{ text: LABELS.both, callback_data: "run:both" }],
     [{ text: "📅 Pick a date", callback_data: "pick" }],
+    [{ text: LABELS.first5, callback_data: "months" }],
   ],
 };
 
@@ -118,6 +123,64 @@ function parseAsOf(raw) {
     return { ok: false, reason: `${raw} is in the future.` };
   }
   return { ok: true, value: raw };
+}
+
+/**
+ * Validate a month before it becomes a workflow input. The grid only offers
+ * valid ones, but callback data arrives over the wire like any other input,
+ * so it is checked here rather than trusted downstream.
+ */
+function parseMonth(raw) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(raw ?? "")) {
+    return { ok: false, reason: "Expected a month in YYYY-MM form." };
+  }
+  if (raw > todayISO().slice(0, 7)) {
+    return { ok: false, reason: `${raw} is in the future.` };
+  }
+  return { ok: true, value: raw };
+}
+
+/**
+ * The twelve months of one year as an inline keyboard. Future months render as
+ * an inert dot, as do months past the MAX_MONTHS_BACK horizon.
+ */
+function buildMonthGrid(year) {
+  const now = new Date();
+  const current = { year: now.getUTCFullYear(), month: now.getUTCMonth() };
+  const thisMonth = todayISO().slice(0, 7);
+  const blank = { text: " ", callback_data: "noop" };
+
+  // ◀ only if the previous year still has a month inside the horizon (its
+  // newest is December); ▶ only while the shown year is behind the current one.
+  const navPrev =
+    monthsBetween({ year: year - 1, month: 11 }, current) <= MAX_MONTHS_BACK
+      ? { text: "◀", callback_data: `yr:${year - 1}` }
+      : blank;
+  const navNext =
+    year < current.year ? { text: "▶", callback_data: `yr:${year + 1}` } : blank;
+
+  const rows = [[navPrev, { text: String(year), callback_data: "noop" }, navNext]];
+
+  let row = [];
+  for (let month = 0; month < 12; month++) {
+    const iso = `${year}-${pad(month + 1)}`;
+    const elapsed = monthsBetween({ year, month }, current);
+    const selectable = iso <= thisMonth && elapsed <= MAX_MONTHS_BACK;
+
+    row.push(
+      selectable
+        ? { text: MONTHS[month].slice(0, 3), callback_data: `mo:${iso}` }
+        : { text: "·", callback_data: "noop" },
+    );
+
+    if (row.length === 4) {
+      rows.push(row);
+      row = [];
+    }
+  }
+
+  rows.push([{ text: "« Back", callback_data: "menu" }]);
+  return { inline_keyboard: rows };
 }
 
 /**
@@ -212,7 +275,7 @@ function editMessage(env, chatId, messageId, text, replyMarkup) {
 
 /* --------------------------------- github --------------------------------- */
 
-async function triggerWorkflow(env, scan, asOf) {
+async function triggerWorkflow(env, scan, asOf, month) {
   const url =
     `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}` +
     `/actions/workflows/${WORKFLOW_FILE}/dispatches`;
@@ -227,10 +290,11 @@ async function triggerWorkflow(env, scan, asOf) {
       "User-Agent": "telegram-trigger-worker",
       "Content-Type": "application/json",
     },
-    // as_of is always sent (empty = latest bar); an undeclared input is a 422.
+    // Every input is always sent (empty = the default); an undeclared or
+    // missing input is a 422.
     body: JSON.stringify({
       ref: env.GITHUB_BRANCH,
-      inputs: { scan, as_of: asOf ?? "" },
+      inputs: { scan, as_of: asOf ?? "", month: month ?? "" },
     }),
   });
 
@@ -241,16 +305,18 @@ async function triggerWorkflow(env, scan, asOf) {
   return { ok: false, status: resp.status, detail: await resp.text() };
 }
 
-async function runScan(env, chatId, scan, asOf = "") {
-  const result = await triggerWorkflow(env, scan, asOf);
+async function runScan(env, chatId, scan, asOf = "", month = "") {
+  const result = await triggerWorkflow(env, scan, asOf, month);
 
   if (result.ok) {
-    const when = asOf ? ` as of ${asOf}` : "";
+    const when = month ? ` for ${month}` : asOf ? ` as of ${asOf}` : "";
+    // The first5 report always has rows, so do not promise silence there.
+    const caveat = scan === "first5" ? "" : " (only if something matches)";
     await sendMessage(
       env,
       chatId,
       `✅ ${LABELS[scan]} scan${when} triggered. Results arrive in a minute ` +
-        `or two (only if something matches).`,
+        `or two${caveat}.`,
     );
   } else {
     console.error("workflow_dispatch failed:", result.status, result.detail);
@@ -284,6 +350,32 @@ async function handleCallback(env, callback) {
 
   if (action === "pick") {
     await editMessage(env, chatId, messageId, "Scan which side for a past date?", SCAN_CHOICE_MENU);
+    return;
+  }
+
+  // The first-five report picks a month, not a day, so it has its own grid.
+  if (action === "months" || action === "yr") {
+    const thisYear = new Date().getUTCFullYear();
+    const year = action === "yr" ? Number(scan) : thisYear;
+    // The grid only ever emits years in range; a forged one is dropped rather
+    // than rendered as a page of dots.
+    const oldest = thisYear - Math.ceil(MAX_MONTHS_BACK / 12) - 1;
+    if (!Number.isInteger(year) || year < oldest || year > thisYear) return;
+    await editMessage(
+      env,
+      chatId,
+      messageId,
+      `${LABELS.first5} — pick a month:`,
+      buildMonthGrid(year),
+    );
+    return;
+  }
+
+  if (action === "mo") {
+    const month = parseMonth(scan);
+    if (month.ok) {
+      await runScan(env, chatId, "first5", "", month.value);
+    }
     return;
   }
 
@@ -352,7 +444,9 @@ async function handleMessage(env, message) {
       chatId,
       "Send /start to pick a scan, or use /scan (oversold), " +
         "/short (overbought), or /both.\n\n" +
-        "Add a date to scan a past session: /scan 2026-09-01",
+        "Add a date to scan a past session: /scan 2026-09-01\n\n" +
+        "The /start menu also has \"First 5 days\" — how every ticker did over " +
+        "the opening sessions of a month.",
     );
   }
 }

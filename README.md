@@ -6,12 +6,16 @@ After the US close they check every ticker and send Telegram alerts: an
 automatically on a schedule, and either can be triggered on demand from a
 Telegram button.
 
+A third, on-demand report ranks the whole list by how it performed over the
+**first five trading days of a month**.
+
 | Piece | Where it runs | What it does |
 | --- | --- | --- |
 | `scanner_core.py` | — | Shared data fetch, indicators, tables, Telegram send |
 | `oversold_scanner.py` | GitHub Actions | Long-side screen |
 | `overbought_scanner.py` | GitHub Actions | Short-side screen |
-| `telegram_trigger_worker.js` | Cloudflare Workers | Telegram menu to run either on demand |
+| `first_five_scanner.py` | GitHub Actions | Month-open performance ranking (on demand) |
+| `telegram_trigger_worker.js` | Cloudflare Workers | Telegram menu to run any of them on demand |
 
 ## Strategy logic
 
@@ -63,6 +67,45 @@ constraint for the short side is the **distance** requirement, not RSI: these
 banks rarely extend 4–5% above their 20-day average, so Setup C fires less
 often than you might expect.
 
+### First five days — `first_five_scanner.py`
+
+Not a screen — a **ranking**. It reports every ticker, sorted by its return
+over the opening sessions of a month, and is the classic "first five days"
+read on where money went as the month turned.
+
+The return is measured **from the previous month's closing price** to the close
+of the 5th trading day, so a gap up on the first session counts. Nothing is
+filtered: all 44 names appear, split into an up table and a down table, with a
+one-line summary underneath.
+
+```
+First 5 trading days of September 2026
+2026-09-01 → 2026-09-08 — measured from the prior close
+
+🟢 Up
+STK        PREV     LAST     RET
+--------------------------------
+HIFS     288.27   310.59    7.7%
+ESQ      111.72   118.28    5.9%
+
+🔴 Down
+...
+
+36 up / 8 down of 44 — average +1.6%, 3 moved 5%+
+```
+
+`PREV` is the prior month's closing price, `LAST` the close of the final
+session in the window. The date line spans the actual sessions used, which is
+why September 2026 runs to the 8th — the 7th was Labor Day.
+
+Run it mid-month and it uses whatever sessions exist so far, saying `(partial)`
+in the header and naming the real count (`First 3 trading days of …`). It is
+never silent: unlike the two screens, this report always has rows.
+
+Settings live at the top of the script: `DEFAULT_DAYS` (5), `STRONG_MOVE` (the
+5% cutoff for the movers count), and `PERIOD` (3 years of bars, enough for any
+month the Telegram picker offers).
+
 ### Alert format
 
 Matches are sent as fixed-width tables, most stretched first, wrapped in
@@ -75,7 +118,8 @@ JBSS      72.43   -7.4%    78.21   32.0
 ```
 
 The second column is `DIFF` (% versus SMA20) in the SMA tables and `D10`
-(% over the last 10 sessions) in the sharp-move tables.
+(% over the last 10 sessions) in the sharp-move tables. The first-five report
+uses its own columns (`PREV` / `LAST` / `RET`) and always sends.
 
 **Every run reports back**, including quiet ones:
 
@@ -162,6 +206,20 @@ python oversold_scanner.py
 python overbought_scanner.py
 ```
 
+The month-open report is its own script:
+
+```bash
+python first_five_scanner.py                  # latest month with 5 sessions
+python first_five_scanner.py --month 2026-03  # a specific month, print only
+python first_five_scanner.py --month 2026-03 --send
+python first_five_scanner.py --days 3         # count 3 sessions, not 5
+```
+
+With no `--month` it picks the current month once five sessions have printed,
+and the previous one before that — so early in a month you get the last
+complete window rather than a two-day sliver. As with `--as-of`, naming a month
+prints only unless you add `--send`.
+
 ### Running as of an earlier date
 
 Both scripts take `--as-of` to reproduce what they would have printed on a past
@@ -189,8 +247,11 @@ both are after the 4:00pm ET close). Scheduled runs execute **both** scanners,
 which send two separate Telegram messages.
 
 It also supports **workflow_dispatch** with a `scan` input — `both` (default),
-`oversold`, or `overbought` — so you can run one side by hand from the Actions
-tab, or from the Telegram menu via the Worker.
+`oversold`, `overbought`, or `first5` — so you can run one side by hand from
+the Actions tab, or from the Telegram menu via the Worker. `both` still means
+the oversold/overbought pair; `first5` is on demand only and never runs on the
+schedule. Two text inputs go with it: `as_of` (a session, for the two screens)
+and `month` (a `YYYY-MM`, for `first5`); both blank means "the latest".
 
 After pushing the repo:
 
@@ -213,13 +274,16 @@ Telegram commands:
 
 | Command | Runs |
 | --- | --- |
-| `/start` or `/menu` | Shows inline buttons: 📉 Oversold, 📈 Overbought, 🔀 Both |
+| `/start` or `/menu` | Shows inline buttons: 📉 Oversold, 📈 Overbought, 🔀 Both, 📅 Pick a date, 🗓 First 5 days |
 | `/scan` or `/oversold` | Oversold scan on the latest bar |
 | `/short` or `/overbought` | Overbought scan on the latest bar |
 | `/both` | Both |
 | `/scan 2026-09-01` | Oversold scan **as of that session** |
 | `/short 2026-09-01` | Overbought scan as of that session |
 | `/both 2026-09-01` | Both, as of that session |
+
+The month-open report has **no text command** — it is the 🗓 **First 5 days**
+button on the `/start` menu, because it needs a month rather than a date.
 
 Anything else gets a one-line usage hint.
 
@@ -242,16 +306,35 @@ navigation stops at 24 months back — matching `LOOKBACK_HISTORICAL` in
 Market holidays stay selectable because the scanner rolls back to the previous
 session anyway.
 
+### Picking a month for the first-five report
+
+`/start` → **🗓 First 5 days** → a year of months appears:
+
+```
+      ◀   2026   
+   Jan Feb Mar Apr
+   May Jun Jul Aug
+   Sep  ·   ·   ·
+```
+
+Same idea one level up: `◀ ▶` redraw the same message a year at a time, and
+future or out-of-horizon months are an inert `·`. Tapping a month dispatches
+the report for it. There is no side to choose first — the report covers every
+ticker, up and down together.
+
 It is built entirely from inline keyboards, so there is no extra hosted page
 and it works in groups. Everything routes through `callback_data` (`run:`,
-`cal:`, `nav:`, `day:`, `noop`), which stays well inside Telegram's 64-byte
-limit.
+`cal:`, `nav:`, `day:`, `months`, `yr:`, `mo:`, `noop`), which stays well
+inside Telegram's 64-byte limit.
 
 The date is validated in the Worker before it goes anywhere: exact
-`YYYY-MM-DD`, a real calendar date, and not in the future. Bad input gets a
-reply explaining the format rather than a dispatch. The workflow then passes it
-to the script through an `env:` variable, quoted — never interpolated into the
-shell line — so a hostile input cannot escape into the runner.
+`YYYY-MM-DD`, a real calendar date, and not in the future. Months get the same
+treatment — exact `YYYY-MM`, month `01`–`12`, not in the future — even though
+they only ever arrive from our own grid, since `callback_data` comes over the
+wire like any other input. Bad input gets a reply explaining the format rather
+than a dispatch. The workflow then passes both to the scripts through `env:`
+variables, quoted — never interpolated into the shell line — so a hostile input
+cannot escape into the runner.
 
 A backdated scan is delivered to every id in `TELEGRAM_CHAT_ID`, not only the
 person who asked.
@@ -304,6 +387,7 @@ default branch — push the repo before testing the worker.
 scanner_core.py                  # shared: fetch, indicators, tables, Telegram
 oversold_scanner.py              # long-side setups (A + B)
 overbought_scanner.py            # short-side setups (C + D)
+first_five_scanner.py            # month-open performance ranking (on demand)
 requirements.txt                 # pinned yfinance / pandas / requests
 .github/workflows/daily_scan.yml # daily cron + manual trigger with scan input
 telegram_trigger_worker.js       # Cloudflare Worker: Telegram menu -> dispatch
