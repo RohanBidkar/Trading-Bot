@@ -6,14 +6,17 @@ After the US close they check every ticker and send Telegram alerts: an
 automatically on a schedule, and either can be triggered on demand from a
 Telegram button.
 
-A third, on-demand report ranks the whole list by how it performed over the
-**first five trading days of a month**.
+Two more on-demand reports cover the whole list rather than screening it: one
+ranks every ticker by how it performed over the **first five trading days of a
+month**, the other prints each ticker's **SMA20 and the prices 2.8% either side
+of it**.
 
 | Piece | Where it runs | What it does |
 | --- | --- | --- |
 | `scanner_core.py` | — | Shared data fetch, indicators, tables, Telegram send |
 | `oversold_scanner.py` | GitHub Actions | Long-side screen |
 | `overbought_scanner.py` | GitHub Actions | Short-side screen |
+| `sma_band_scanner.py` | GitHub Actions | SMA20 ±2.8% price levels for every ticker (on demand) |
 | `first_five_scanner.py` | GitHub Actions | Month-open performance ranking (on demand) |
 | `telegram_trigger_worker.js` | Cloudflare Workers | Telegram menu to run any of them on demand |
 
@@ -105,6 +108,39 @@ never silent: unlike the two screens, this report always has rows.
 Settings live at the top of the script: `DEFAULT_DAYS` (5), `STRONG_MOVE` (the
 5% cutoff for the movers count), and `PERIOD` (3 years of bars, enough for any
 month the Telegram picker offers).
+
+### SMA20 bands — `sma_band_scanner.py`
+
+Not a screen either — a **levels table**. Nothing is filtered: all 44 names
+appear with the two prices that sit `BAND_PCT` (2.8%) either side of their
+20-day average, so you can see in one place where each name would have to trade
+to reach the band.
+
+```
+LOW  = SMA20 × (1 − 2.8/100)
+HIGH = SMA20 × (1 + 2.8/100)
+```
+
+```
+SMA20 bands ±2.8% — bar 2026-09-09
+LOW/HIGH are SMA20 ∓2.8%. 6 at or below the low band, 2 at or above the high, of 44 scanned.
+
+STK      CLOSE   SMA20    -2.8%    +2.8%   DIFF
+-----------------------------------------------
+JBSS      72.43   78.21    76.02    80.40   -7.4%
+HIFS     288.27  296.10   287.81   304.39   -2.6%
+KRE       61.07   60.44    58.75    62.13    1.0%
+```
+
+Rows are sorted most-stretched-below first, so the names nearest the low band —
+or already through it — sit at the top. `DIFF` is where the close is today
+relative to SMA20: at `-2.8%` or lower the low band is already taken out, at
+`+2.8%` or higher the high one is.
+
+`BAND_PCT` at the top of the script sets the default; `--band` overrides it for
+one run. The table goes out in several messages if it ever exceeds Telegram's
+4096-character limit (`MAX_MESSAGE_CHARS`), which 44 tickers currently do not.
+Like the first-five report, it always has rows.
 
 ### Alert format
 
@@ -212,6 +248,8 @@ python overbought_scanner.py
 The month-open report is its own script:
 
 ```bash
+python sma_band_scanner.py                    # SMA20 ±2.8% levels, all tickers
+python sma_band_scanner.py --band 3.0         # a different band
 python first_five_scanner.py                  # latest month with 5 sessions
 python first_five_scanner.py --month 2026-03  # a specific month, print only
 python first_five_scanner.py --month 2026-03 --send
@@ -250,11 +288,12 @@ both are after the 4:00pm ET close). Scheduled runs execute **both** scanners,
 which send two separate Telegram messages.
 
 It also supports **workflow_dispatch** with a `scan` input — `both` (default),
-`oversold`, `overbought`, or `first5` — so you can run one side by hand from
-the Actions tab, or from the Telegram menu via the Worker. `both` still means
-the oversold/overbought pair; `first5` is on demand only and never runs on the
-schedule. Two text inputs go with it: `as_of` (a session, for the two screens)
-and `month` (a `YYYY-MM`, for `first5`); both blank means "the latest".
+`oversold`, `overbought`, `first5`, or `bands` — so you can run one side by hand
+from the Actions tab, or from the Telegram menu via the Worker. `both` still
+means the oversold/overbought pair; `first5` and `bands` are on demand only and
+never run on the schedule. Two text inputs go with it: `as_of` (a session, used
+by the two screens and by `bands`) and `month` (a `YYYY-MM`, for `first5`); both
+blank means "the latest".
 
 After pushing the repo:
 
@@ -277,13 +316,15 @@ Telegram commands:
 
 | Command | Runs |
 | --- | --- |
-| `/start` or `/menu` | Shows inline buttons: 📉 Oversold, 📈 Overbought, 🔀 Both, 📅 Pick a date, 🗓 First 5 days |
+| `/start` or `/menu` | Shows inline buttons: 📉 Oversold, 📈 Overbought, 🔀 Both, 🎯 SMA20 bands, 📅 Pick a date, 🗓 First 5 days |
 | `/scan` or `/oversold` | Oversold scan on the latest bar |
 | `/short` or `/overbought` | Overbought scan on the latest bar |
 | `/both` | Both |
+| `/bands` or `/sma` | SMA20 ±2.8% levels for every ticker |
 | `/scan 2026-09-01` | Oversold scan **as of that session** |
 | `/short 2026-09-01` | Overbought scan as of that session |
 | `/both 2026-09-01` | Both, as of that session |
+| `/bands 2026-09-01` | Band levels as of that session |
 
 The month-open report has **no text command** — it is the 🗓 **First 5 days**
 button on the `/start` menu, because it needs a month rather than a date.
@@ -390,6 +431,7 @@ default branch — push the repo before testing the worker.
 scanner_core.py                  # shared: fetch, indicators, tables, Telegram
 oversold_scanner.py              # long-side setups (A + B)
 overbought_scanner.py            # short-side setups (C + D)
+sma_band_scanner.py              # SMA20 +/-2.8% levels for every ticker
 first_five_scanner.py            # month-open performance ranking (on demand)
 requirements.txt                 # pinned yfinance / pandas / requests
 .github/workflows/daily_scan.yml # daily cron + manual trigger with scan input

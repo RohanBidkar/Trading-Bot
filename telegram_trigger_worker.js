@@ -10,6 +10,7 @@
  *   /scan [YYYY-MM-DD]     oversold (long side), optionally as of a past date
  *   /short [YYYY-MM-DD]    overbought (short side)
  *   /both [YYYY-MM-DD]     run both
+ *   /bands [YYYY-MM-DD]    SMA20 levels 2.8% either side, every ticker
  *
  * The /start menu also offers "First 5 days": how every ticker did over the
  * opening sessions of a month, chosen from a month grid.
@@ -29,6 +30,7 @@ const LABELS = {
   oversold: "📉 Oversold",
   overbought: "📈 Overbought",
   both: "🔀 Both",
+  bands: "🎯 SMA20 bands",
   first5: "🗓 First 5 days",
 };
 
@@ -41,13 +43,15 @@ const MONTHS = [
   "July", "August", "September", "October", "November", "December",
 ];
 
-// Text commands map to the same three choices as the buttons.
+// Text commands map to the same choices as the buttons.
 const COMMANDS = {
   "/scan": "oversold",
   "/oversold": "oversold",
   "/short": "overbought",
   "/overbought": "overbought",
   "/both": "both",
+  "/bands": "bands",
+  "/sma": "bands",
 };
 
 const MAIN_MENU = {
@@ -57,6 +61,7 @@ const MAIN_MENU = {
       { text: LABELS.overbought, callback_data: "run:overbought" },
     ],
     [{ text: LABELS.both, callback_data: "run:both" }],
+    [{ text: LABELS.bands, callback_data: "run:bands" }],
     [{ text: "📅 Pick a date", callback_data: "pick" }],
     [{ text: LABELS.first5, callback_data: "months" }],
   ],
@@ -69,6 +74,7 @@ const SCAN_CHOICE_MENU = {
       { text: LABELS.overbought, callback_data: "cal:overbought" },
     ],
     [{ text: LABELS.both, callback_data: "cal:both" }],
+    [{ text: LABELS.bands, callback_data: "cal:bands" }],
     [{ text: "« Back", callback_data: "menu" }],
   ],
 };
@@ -310,8 +316,9 @@ async function runScan(env, chatId, scan, asOf = "", month = "") {
 
   if (result.ok) {
     const when = month ? ` for ${month}` : asOf ? ` as of ${asOf}` : "";
-    // The first5 report always has rows, so do not promise silence there.
-    const caveat = scan === "first5" ? "" : " (only if something matches)";
+    // first5 and bands list every ticker, so do not promise silence there.
+    const caveat =
+      scan === "first5" || scan === "bands" ? "" : " (only if something matches)";
     await sendMessage(
       env,
       chatId,
@@ -445,6 +452,8 @@ async function handleMessage(env, message) {
       "Send /start to pick a scan, or use /scan (oversold), " +
         "/short (overbought), or /both.\n\n" +
         "Add a date to scan a past session: /scan 2026-09-01\n\n" +
+        "/bands lists every ticker with its SMA20 and the prices 2.8% either " +
+        "side of it.\n\n" +
         "The /start menu also has \"First 5 days\" — how every ticker did over " +
         "the opening sessions of a month.",
     );

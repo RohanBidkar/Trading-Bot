@@ -221,7 +221,8 @@ def send_telegram(message: str) -> None:
             print(f"  {_mask(chat_id)} FAILED: {exc}")
 
 
-def parse_args(description: str):
+def build_parser(description: str) -> argparse.ArgumentParser:
+    """The flags every dated scan shares; callers may add their own."""
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument(
         "--as-of",
@@ -233,7 +234,11 @@ def parse_args(description: str):
         action="store_true",
         help="send to Telegram even when --as-of is used",
     )
-    return parser.parse_args()
+    return parser
+
+
+def parse_args(description: str):
+    return build_parser(description).parse_args()
 
 
 def run(name: str, setups: list) -> None:
