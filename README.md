@@ -112,14 +112,17 @@ Matches are sent as fixed-width tables, most stretched first, wrapped in
 Telegram `<pre>` blocks so the columns stay aligned in a monospace font:
 
 ```
-STK       CLOSE    DIFF    SMA20    RSI
----------------------------------------
-JBSS      72.43   -7.4%    78.21   32.0
+STK       CLOSE    DIFF    SMA20    RSI     D10
+-----------------------------------------------
+JBSS      72.43   -7.4%    78.21   32.0  -11.8%
 ```
 
 The second column is `DIFF` (% versus SMA20) in the SMA tables and `D10`
-(% over the last 10 sessions) in the sharp-move tables. The first-five report
-uses its own columns (`PREV` / `LAST` / `RET`) and always sends.
+(% over the last 10 sessions) in the sharp-move tables. The SMA tables carry
+`D10` again as a trailing column, so the 10-day move is visible next to RSI;
+the sharp-move tables drop it, since it is already their metric column. The
+first-five report uses its own columns (`PREV` / `LAST` / `RET`) and always
+sends.
 
 **Every run reports back**, including quiet ones:
 

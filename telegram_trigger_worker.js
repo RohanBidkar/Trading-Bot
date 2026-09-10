@@ -315,8 +315,8 @@ async function runScan(env, chatId, scan, asOf = "", month = "") {
     await sendMessage(
       env,
       chatId,
-      `✅ ${LABELS[scan]} scan${when} triggered. Results arrive in a minute ` +
-        `or two${caveat}.`,
+      `✅ ${LABELS[scan]} scan${when} triggered. Results will arrive in some time  ` +
+        `${caveat}.`,
     );
   } else {
     console.error("workflow_dispatch failed:", result.status, result.detail);

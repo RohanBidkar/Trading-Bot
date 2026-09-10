@@ -155,16 +155,25 @@ def plain(text: str) -> str:
 
 def format_table(rows: list, setup: Setup) -> str:
     """Fixed-width table so the columns line up in a monospace block."""
+    # The sharp-move setups already show `move` as their metric column, so only
+    # add the D10 column when it would not repeat what is already there.
+    show_move = setup.key != "move"
+
     header = f"{'STK':<6}{'CLOSE':>9}{setup.column:>8}{'SMA20':>9}{'RSI':>7}"
+    if show_move:
+        header += f"{'D10':>8}"
     lines = [header, "-" * len(header)]
     for m in rows:
-        lines.append(
+        line = (
             f"{m['ticker']:<6}"
             f"{m['close']:>9.2f}"
             f"{m[setup.key]:>7.1f}%"
             f"{m['sma']:>9.2f}"
             f"{m['rsi']:>7.1f}"
         )
+        if show_move:
+            line += f"{m['move']:>7.1f}%"
+        lines.append(line)
     return "\n".join(lines)
 
 
