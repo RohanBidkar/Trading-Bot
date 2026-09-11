@@ -16,6 +16,7 @@ on:
           - oversold
           - overbought
           - first5
+          - last5
           - bands
       as_of:
         description: "Scan a past session (YYYY-MM-DD). Blank = latest bar."
@@ -80,6 +81,21 @@ jobs:
             python overbought_scanner.py --as-of "$AS_OF" --send
           else
             python overbought_scanner.py
+          fi
+
+      - name: Run last-trading-days scanner
+        # Only on request - it lists every ticker, so it is not part of "both".
+        if: env.SCAN == 'last5'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        # AS_OF is passed through the environment and quoted, never
+        # interpolated into the shell line, so a hostile input cannot escape.
+        run: |
+          if [ -n "$AS_OF" ]; then
+            python last_five_scanner.py --as-of "$AS_OF" --send
+          else
+            python last_five_scanner.py
           fi
 
       - name: Run SMA20 band levels

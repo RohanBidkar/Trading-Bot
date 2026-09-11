@@ -25,6 +25,7 @@ import pandas as pd
 from scanner_core import (
     NOTIFY_WHEN_EMPTY,
     TICKERS,
+    format_return_table,
     get_close,
     plain,
     send_telegram,
@@ -112,20 +113,6 @@ def resolve_month(price_data: dict, days: int) -> tuple:
     if have >= days:
         return today.year, today.month
     return previous_month(today.year, today.month)
-
-
-def format_table(rows: list) -> str:
-    """Fixed-width table so the columns line up in a monospace block."""
-    header = f"{'STK':<6}{'PREV':>9}{'LAST':>9}{'RET':>8}"
-    lines = [header, "-" * len(header)]
-    for m in rows:
-        lines.append(
-            f"{m['ticker']:<6}"
-            f"{m['base']:>9.2f}"
-            f"{m['last']:>9.2f}"
-            f"{m['ret']:>7.1f}%"
-        )
-    return "\n".join(lines)
 
 
 def parse_args():
@@ -217,7 +204,7 @@ def main() -> None:
     for heading, group in (("🟢 <b>Up</b>", up), ("🔴 <b>Down</b>", down)):
         if not group:
             continue
-        table = format_table(group)
+        table = format_return_table(group)
         print(f"\n{plain(heading)}")
         print(table)
         sections.append(f"{heading}\n<pre>{escape(table)}</pre>")

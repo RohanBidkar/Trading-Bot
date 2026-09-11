@@ -11,9 +11,11 @@
  *   /short [YYYY-MM-DD]    overbought (short side)
  *   /both [YYYY-MM-DD]     run both
  *   /bands [YYYY-MM-DD]    SMA20 levels 2.8% either side, every ticker
+ *   /last [YYYY-MM-DD]     ranking over the last 5 trading days
  *
  * The /start menu also offers "First 5 days": how every ticker did over the
- * opening sessions of a month, chosen from a month grid.
+ * opening sessions of a month, chosen from a month grid. Its rolling twin,
+ * "Last 5 days", needs no month and runs straight from the menu.
  *
  * Required environment variables / secrets:
  *   TELEGRAM_TOKEN         bot token from @BotFather (used to reply)
@@ -32,6 +34,7 @@ const LABELS = {
   both: "🔀 Both",
   bands: "🎯 SMA20 bands",
   first5: "🗓 First 5 days",
+  last5: "⏱ Last 5 days",
 };
 
 // How far back the calendar will navigate. Matches LOOKBACK_HISTORICAL ("2y")
@@ -52,7 +55,12 @@ const COMMANDS = {
   "/both": "both",
   "/bands": "bands",
   "/sma": "bands",
+  "/last": "last5",
+  "/last5": "last5",
 };
+
+// These list every ticker rather than screening, so a run is never silent.
+const ALWAYS_REPORTS = new Set(["first5", "last5", "bands"]);
 
 const MAIN_MENU = {
   inline_keyboard: [
@@ -63,7 +71,10 @@ const MAIN_MENU = {
     [{ text: LABELS.both, callback_data: "run:both" }],
     [{ text: LABELS.bands, callback_data: "run:bands" }],
     [{ text: "📅 Pick a date", callback_data: "pick" }],
-    [{ text: LABELS.first5, callback_data: "months" }],
+    [
+      { text: LABELS.first5, callback_data: "months" },
+      { text: LABELS.last5, callback_data: "run:last5" },
+    ],
   ],
 };
 
@@ -74,7 +85,10 @@ const SCAN_CHOICE_MENU = {
       { text: LABELS.overbought, callback_data: "cal:overbought" },
     ],
     [{ text: LABELS.both, callback_data: "cal:both" }],
-    [{ text: LABELS.bands, callback_data: "cal:bands" }],
+    [
+      { text: LABELS.bands, callback_data: "cal:bands" },
+      { text: LABELS.last5, callback_data: "cal:last5" },
+    ],
     [{ text: "« Back", callback_data: "menu" }],
   ],
 };
@@ -316,14 +330,12 @@ async function runScan(env, chatId, scan, asOf = "", month = "") {
 
   if (result.ok) {
     const when = month ? ` for ${month}` : asOf ? ` as of ${asOf}` : "";
-    // first5 and bands list every ticker, so do not promise silence there.
-    const caveat =
-      scan === "first5" || scan === "bands" ? "" : " (only if something matches)";
+    const caveat = ALWAYS_REPORTS.has(scan) ? "" : " (only if something matches)";
     await sendMessage(
       env,
       chatId,
-      `✅ ${LABELS[scan]} scan${when} triggered. Results will arrive in some time  ` +
-        `${caveat}.`,
+      `✅ ${LABELS[scan]} scan${when} triggered. ` +
+        `Results will arrive in some time${caveat}.`,
     );
   } else {
     console.error("workflow_dispatch failed:", result.status, result.detail);
@@ -453,7 +465,7 @@ async function handleMessage(env, message) {
         "/short (overbought), or /both.\n\n" +
         "Add a date to scan a past session: /scan 2026-09-01\n\n" +
         "/bands lists every ticker with its SMA20 and the prices 2.8% either " +
-        "side of it.\n\n" +
+        "side of it, and /last ranks them over the last 5 trading days.\n\n" +
         "The /start menu also has \"First 5 days\" — how every ticker did over " +
         "the opening sessions of a month.",
     );

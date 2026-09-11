@@ -177,6 +177,23 @@ def format_table(rows: list, setup: Setup) -> str:
     return "\n".join(lines)
 
 
+def format_return_table(rows: list) -> str:
+    """PREV/LAST/RET table, shared by the two whole-list return reports.
+
+    Rows need `ticker`, `base` (the close measured from), `last` and `ret`.
+    """
+    header = f"{'STK':<6}{'PREV':>9}{'LAST':>9}{'RET':>8}"
+    lines = [header, "-" * len(header)]
+    for m in rows:
+        lines.append(
+            f"{m['ticker']:<6}"
+            f"{m['base']:>9.2f}"
+            f"{m['last']:>9.2f}"
+            f"{m['ret']:>7.1f}%"
+        )
+    return "\n".join(lines)
+
+
 def _mask(value) -> str:
     """Show just enough of an id/token to compare it, without leaking it."""
     value = str(value)

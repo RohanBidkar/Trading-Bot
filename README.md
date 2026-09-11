@@ -6,10 +6,10 @@ After the US close they check every ticker and send Telegram alerts: an
 automatically on a schedule, and either can be triggered on demand from a
 Telegram button.
 
-Two more on-demand reports cover the whole list rather than screening it: one
-ranks every ticker by how it performed over the **first five trading days of a
-month**, the other prints each ticker's **SMA20 and the prices 2.8% either side
-of it**.
+Three more on-demand reports cover the whole list rather than screening it: two
+rank every ticker by its return — over the **first five trading days of a
+month**, or over the **last five trading sessions** — and one prints each
+ticker's **SMA20 and the prices 2.8% either side of it**.
 
 | Piece | Where it runs | What it does |
 | --- | --- | --- |
@@ -17,6 +17,7 @@ of it**.
 | `oversold_scanner.py` | GitHub Actions | Long-side screen |
 | `overbought_scanner.py` | GitHub Actions | Short-side screen |
 | `sma_band_scanner.py` | GitHub Actions | SMA20 ±2.8% price levels for every ticker (on demand) |
+| `last_five_scanner.py` | GitHub Actions | Trailing 5-session performance ranking (on demand) |
 | `first_five_scanner.py` | GitHub Actions | Month-open performance ranking (on demand) |
 | `telegram_trigger_worker.js` | Cloudflare Workers | Telegram menu to run any of them on demand |
 
@@ -108,6 +109,36 @@ never silent: unlike the two screens, this report always has rows.
 Settings live at the top of the script: `DEFAULT_DAYS` (5), `STRONG_MOVE` (the
 5% cutoff for the movers count), and `PERIOD` (3 years of bars, enough for any
 month the Telegram picker offers).
+
+### Last five days — `last_five_scanner.py`
+
+The rolling twin of the report above: the same ranking and the same
+`PREV` / `LAST` / `RET` columns, but the window is the **most recent** sessions
+rather than a month's opening ones, so there is no month to pick.
+
+The return is measured from the close of the session **before** the window, so
+five sessions of change are counted, not four.
+
+```
+Last 5 trading days
+2026-09-03 → 2026-09-10 — measured from the prior close
+
+🟢 Up
+STK        PREV     LAST     RET
+--------------------------------
+HIFS     295.21   308.39    4.5%
+ESQ      114.47   119.13    4.1%
+
+🔴 Down
+...
+
+25 up / 19 down of 44 — average +0.0%, 0 moved 5%+
+```
+
+`--days` widens the window (`--days 10` for a two-week read) and `--as-of` ends
+it at a past session instead of the latest bar. Settings live at the top of the
+script: `DEFAULT_DAYS` (5) and `STRONG_MOVE` (the 5% movers cutoff). Like the
+other whole-list reports, it always has rows.
 
 ### SMA20 bands — `sma_band_scanner.py`
 
@@ -248,6 +279,8 @@ python overbought_scanner.py
 The month-open report is its own script:
 
 ```bash
+python last_five_scanner.py                   # the latest 5 sessions
+python last_five_scanner.py --days 10         # a two-week window
 python sma_band_scanner.py                    # SMA20 ±2.8% levels, all tickers
 python sma_band_scanner.py --band 3.0         # a different band
 python first_five_scanner.py                  # latest month with 5 sessions
@@ -288,12 +321,12 @@ both are after the 4:00pm ET close). Scheduled runs execute **both** scanners,
 which send two separate Telegram messages.
 
 It also supports **workflow_dispatch** with a `scan` input — `both` (default),
-`oversold`, `overbought`, `first5`, or `bands` — so you can run one side by hand
-from the Actions tab, or from the Telegram menu via the Worker. `both` still
-means the oversold/overbought pair; `first5` and `bands` are on demand only and
-never run on the schedule. Two text inputs go with it: `as_of` (a session, used
-by the two screens and by `bands`) and `month` (a `YYYY-MM`, for `first5`); both
-blank means "the latest".
+`oversold`, `overbought`, `first5`, `last5`, or `bands` — so you can run one
+side by hand from the Actions tab, or from the Telegram menu via the Worker.
+`both` still means the oversold/overbought pair; `first5`, `last5` and `bands`
+are on demand only and never run on the schedule. Two text inputs go with it:
+`as_of` (a session, used by everything except `first5`) and `month` (a
+`YYYY-MM`, for `first5`); both blank means "the latest".
 
 After pushing the repo:
 
@@ -316,18 +349,22 @@ Telegram commands:
 
 | Command | Runs |
 | --- | --- |
-| `/start` or `/menu` | Shows inline buttons: 📉 Oversold, 📈 Overbought, 🔀 Both, 🎯 SMA20 bands, 📅 Pick a date, 🗓 First 5 days |
+| `/start` or `/menu` | Shows inline buttons: 📉 Oversold, 📈 Overbought, 🔀 Both, 🎯 SMA20 bands, 📅 Pick a date, 🗓 First 5 days, ⏱ Last 5 days |
 | `/scan` or `/oversold` | Oversold scan on the latest bar |
 | `/short` or `/overbought` | Overbought scan on the latest bar |
 | `/both` | Both |
 | `/bands` or `/sma` | SMA20 ±2.8% levels for every ticker |
+| `/last` or `/last5` | Ranking over the last 5 trading days |
 | `/scan 2026-09-01` | Oversold scan **as of that session** |
 | `/short 2026-09-01` | Overbought scan as of that session |
 | `/both 2026-09-01` | Both, as of that session |
 | `/bands 2026-09-01` | Band levels as of that session |
+| `/last 2026-09-01` | Last 5 sessions ending at that one |
 
 The month-open report has **no text command** — it is the 🗓 **First 5 days**
-button on the `/start` menu, because it needs a month rather than a date.
+button on the `/start` menu, because it needs a month rather than a date. Its
+rolling twin, ⏱ **Last 5 days**, needs no month and so has `/last` as well as a
+button.
 
 Anything else gets a one-line usage hint.
 
@@ -431,6 +468,7 @@ default branch — push the repo before testing the worker.
 scanner_core.py                  # shared: fetch, indicators, tables, Telegram
 oversold_scanner.py              # long-side setups (A + B)
 overbought_scanner.py            # short-side setups (C + D)
+last_five_scanner.py             # trailing 5-session performance ranking
 sma_band_scanner.py              # SMA20 +/-2.8% levels for every ticker
 first_five_scanner.py            # month-open performance ranking (on demand)
 requirements.txt                 # pinned yfinance / pandas / requests
