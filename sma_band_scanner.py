@@ -11,6 +11,8 @@ where each name would have to trade to reach the band:
 DIFF is where the close sits today, relative to SMA20: at -BAND_PCT or lower
 the low band is already taken out, at +BAND_PCT or higher the high one is.
 
+D22/D15/D5 are the % change over the last 22, 15 and 5 trading sessions.
+
 Usage:
     python sma_band_scanner.py
     python sma_band_scanner.py --as-of 2026-09-01          # print only
@@ -31,10 +33,12 @@ from scanner_core import (
     evaluate,
     plain,
     send_telegram,
+    sort_by_tier,
 )
 
 # ---------------- CONFIG ----------------
 BAND_PCT = 2.8            # distance either side of SMA20, in percent
+MOVE_DAYS = (22, 15, 5)   # trading-day % moves shown before the SMA column
 # Telegram rejects anything over 4096 characters, so a long table goes out in
 # several messages rather than failing as one.
 MAX_MESSAGE_CHARS = 3500
@@ -53,7 +57,9 @@ def levels(m: dict, band: float) -> dict:
 def format_table(rows: list, band: float) -> str:
     """Fixed-width table so the columns line up in a monospace block."""
     header = (
-        f"{'STK':<6}{'CLOSE':>8}{f'SMA{SMA_LEN}':>8}"
+        f"{'STK':<6}{'CLOSE':>8}"
+        + "".join(f"{f'D{n}':>7}" for n in MOVE_DAYS)
+        + f"{f'SMA{SMA_LEN}':>8}"
         f"{f'-{band:.1f}%':>9}{f'+{band:.1f}%':>9}{'DIFF':>7}"
     )
     lines = [header, "-" * len(header)]
@@ -61,7 +67,8 @@ def format_table(rows: list, band: float) -> str:
         lines.append(
             f"{m['ticker']:<6}"
             f"{m['close']:>8.2f}"
-            f"{m['sma']:>8.2f}"
+            + "".join(f"{m[f'd{n}']:>6.1f}%" for n in MOVE_DAYS)
+            + f"{m['sma']:>8.2f}"
             f"{m['low']:>9.2f}"
             f"{m['high']:>9.2f}"
             f"{m['diff']:>7.1f}%"
@@ -109,7 +116,7 @@ def main() -> None:
     rows = []
     for ticker in TICKERS:
         try:
-            m = evaluate(ticker, as_of=as_of, period=period)
+            m = evaluate(ticker, as_of=as_of, period=period, moves=MOVE_DAYS)
             if m is not None:
                 rows.append(levels(m, band))
         except Exception as exc:
@@ -124,9 +131,9 @@ def main() -> None:
             )
         return
 
-    # Most stretched below SMA20 first, so the names nearest the low band -
-    # or already through it - are at the top.
-    rows.sort(key=lambda m: m["diff"])
+    # Under-$100 names first, then the rest; within each, most stretched below
+    # SMA20 first, so the names nearest the low band are at the top.
+    rows = sort_by_tier(rows, "diff")
 
     bar_date = max(m["date"] for m in rows)
     below = len([m for m in rows if m["diff"] <= -band])

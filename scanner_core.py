@@ -66,6 +66,16 @@ def tier_threshold(close: float, above: float, below: float) -> float:
     return above if close > PRICE_TIER else below
 
 
+def sort_by_tier(rows: list, key: str, price: str = "close", descending: bool = False) -> list:
+    """Sort by `key`, with every name at or under PRICE_TIER listed first.
+
+    The metric order holds within each tier; the second sort is stable, so it
+    only moves the over-$100 names below the rest.
+    """
+    ordered = sorted(rows, key=lambda m: m[key], reverse=descending)
+    return sorted(ordered, key=lambda m: m[price] > PRICE_TIER)
+
+
 def compute_rsi(series: pd.Series, length: int = RSI_LEN) -> pd.Series:
     """RSI using Wilder's smoothing (what TradingView / StockCharts show).
 
@@ -114,8 +124,12 @@ def get_close(ticker: str, period: str = LOOKBACK) -> pd.Series:
     return df["Close"].dropna()
 
 
-def evaluate(ticker: str, as_of: date = None, period: str = LOOKBACK):
-    """Metrics for one ticker as of the last bar on or before `as_of`."""
+def evaluate(ticker: str, as_of: date = None, period: str = LOOKBACK, moves: tuple = ()):
+    """Metrics for one ticker as of the last bar on or before `as_of`.
+
+    `moves` lists extra lookbacks in trading days; each adds a `d<N>` key with
+    the % change over that many sessions.
+    """
     prices = get_close(ticker, period)
 
     if as_of is not None:
@@ -123,7 +137,7 @@ def evaluate(ticker: str, as_of: date = None, period: str = LOOKBACK):
         # back to the previous trading session.
         prices = prices[prices.index.date <= as_of]
 
-    needed = max(SMA_LEN + RSI_LEN, MOVE_LOOKBACK + 1)
+    needed = max(SMA_LEN + RSI_LEN, MOVE_LOOKBACK + 1, *(n + 1 for n in moves))
     if len(prices) < needed:
         print(f"Skipping {ticker}: only {len(prices)} bars of usable history")
         return None
@@ -137,7 +151,7 @@ def evaluate(ticker: str, as_of: date = None, period: str = LOOKBACK):
         print(f"Skipping {ticker}: indicators not ready")
         return None
 
-    return {
+    metrics = {
         "ticker": ticker,
         "date": prices.index[-1].date(),
         "close": close,
@@ -146,6 +160,10 @@ def evaluate(ticker: str, as_of: date = None, period: str = LOOKBACK):
         "diff": (close - sma) / sma * 100.0,       # % vs SMA20
         "move": (close - past) / past * 100.0,     # % over MOVE_LOOKBACK days
     }
+    for n in moves:
+        base = float(prices.iloc[-(n + 1)])
+        metrics[f"d{n}"] = (close - base) / base * 100.0 if base else float("nan")
+    return metrics
 
 
 def plain(text: str) -> str:
@@ -289,8 +307,11 @@ def run(name: str, setups: list) -> None:
 
     sections = []
     for setup in setups:
-        rows = [m for m in metrics if setup.predicate(m)]
-        rows.sort(key=lambda m: m[setup.key], reverse=setup.descending)
+        rows = sort_by_tier(
+            [m for m in metrics if setup.predicate(m)],
+            setup.key,
+            descending=setup.descending,
+        )
         if not rows:
             continue
         table = format_table(rows, setup)

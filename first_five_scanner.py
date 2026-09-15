@@ -29,6 +29,7 @@ from scanner_core import (
     get_close,
     plain,
     send_telegram,
+    sort_by_tier,
 )
 
 # ---------------- CONFIG ----------------
@@ -194,8 +195,8 @@ def main() -> None:
     title = f"<b>First {sessions} trading day{'s' if sessions != 1 else ''} of {escape(label)}</b>{partial}"
     subtitle = f"{span} — measured from the prior close"
 
-    up = sorted([r for r in rows if r["ret"] > 0], key=lambda r: r["ret"], reverse=True)
-    down = sorted([r for r in rows if r["ret"] <= 0], key=lambda r: r["ret"])
+    up = sort_by_tier([r for r in rows if r["ret"] > 0], "ret", price="last", descending=True)
+    down = sort_by_tier([r for r in rows if r["ret"] <= 0], "ret", price="last")
     average = sum(r["ret"] for r in rows) / len(rows)
 
     print(f"\n{plain(title)}\n{subtitle}")

@@ -15,7 +15,8 @@
  *
  * The /start menu also offers "First 5 days": how every ticker did over the
  * opening sessions of a month, chosen from a month grid. Its rolling twin,
- * "Last 5 days", needs no month and runs straight from the menu.
+ * "Last 5 days", needs no month and runs straight from the menu. "SMA20 bands"
+ * asks first: the latest bar, or a past trading day from the calendar.
  *
  * Required environment variables / secrets:
  *   TELEGRAM_TOKEN         bot token from @BotFather (used to reply)
@@ -69,7 +70,7 @@ const MAIN_MENU = {
       { text: LABELS.overbought, callback_data: "run:overbought" },
     ],
     [{ text: LABELS.both, callback_data: "run:both" }],
-    [{ text: LABELS.bands, callback_data: "run:bands" }],
+    [{ text: LABELS.bands, callback_data: "when:bands" }],
     [{ text: "📅 Pick a date", callback_data: "pick" }],
     [
       { text: LABELS.first5, callback_data: "months" },
@@ -92,6 +93,19 @@ const SCAN_CHOICE_MENU = {
     [{ text: "« Back", callback_data: "menu" }],
   ],
 };
+
+/** Latest bar or a calendar, for a scan whose button should ask first. */
+function buildWhenMenu(scan) {
+  return {
+    inline_keyboard: [
+      [
+        { text: "⚡ Latest bar", callback_data: `run:${scan}` },
+        { text: "📅 Pick a date", callback_data: `cal:${scan}` },
+      ],
+      [{ text: "« Back", callback_data: "menu" }],
+    ],
+  };
+}
 
 /* ------------------------------ date helpers ------------------------------ */
 
@@ -402,6 +416,17 @@ async function handleCallback(env, callback) {
 
   if (action === "run") {
     await runScan(env, chatId, scan);
+    return;
+  }
+
+  if (action === "when") {
+    await editMessage(
+      env,
+      chatId,
+      messageId,
+      `${LABELS[scan]} — latest bar or a past date?`,
+      buildWhenMenu(scan),
+    );
     return;
   }
 
