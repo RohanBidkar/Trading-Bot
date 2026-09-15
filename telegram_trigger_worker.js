@@ -11,12 +11,14 @@
  *   /short [YYYY-MM-DD]    overbought (short side)
  *   /both [YYYY-MM-DD]     run both
  *   /bands [YYYY-MM-DD]    SMA20 levels 2.8% either side, every ticker
+ *   /fx [YYYY-MM-DD]       the same levels for XAUUSD, ETHUSD, EURUSD, GBPUSD, BTCUSD
  *   /last [YYYY-MM-DD]     ranking over the last 5 trading days
  *
  * The /start menu also offers "First 5 days": how every ticker did over the
  * opening sessions of a month, chosen from a month grid. Its rolling twin,
  * "Last 5 days", needs no month and runs straight from the menu. "SMA20 bands"
- * asks first: the latest bar, or a past trading day from the calendar.
+ * and "Forex SMA bands" ask first: the latest bar, or a past day from the
+ * calendar.
  *
  * Required environment variables / secrets:
  *   TELEGRAM_TOKEN         bot token from @BotFather (used to reply)
@@ -34,6 +36,7 @@ const LABELS = {
   overbought: "📈 Overbought",
   both: "🔀 Both",
   bands: "🎯 SMA20 bands",
+  fxbands: "💱 Forex SMA bands",
   first5: "🗓 First 5 days",
   last5: "⏱ Last 5 days",
 };
@@ -56,12 +59,14 @@ const COMMANDS = {
   "/both": "both",
   "/bands": "bands",
   "/sma": "bands",
+  "/fx": "fxbands",
+  "/forex": "fxbands",
   "/last": "last5",
   "/last5": "last5",
 };
 
 // These list every ticker rather than screening, so a run is never silent.
-const ALWAYS_REPORTS = new Set(["first5", "last5", "bands"]);
+const ALWAYS_REPORTS = new Set(["first5", "last5", "bands", "fxbands"]);
 
 const MAIN_MENU = {
   inline_keyboard: [
@@ -70,7 +75,10 @@ const MAIN_MENU = {
       { text: LABELS.overbought, callback_data: "run:overbought" },
     ],
     [{ text: LABELS.both, callback_data: "run:both" }],
-    [{ text: LABELS.bands, callback_data: "when:bands" }],
+    [
+      { text: LABELS.bands, callback_data: "when:bands" },
+      { text: LABELS.fxbands, callback_data: "when:fxbands" },
+    ],
     [{ text: "📅 Pick a date", callback_data: "pick" }],
     [
       { text: LABELS.first5, callback_data: "months" },
@@ -88,8 +96,9 @@ const SCAN_CHOICE_MENU = {
     [{ text: LABELS.both, callback_data: "cal:both" }],
     [
       { text: LABELS.bands, callback_data: "cal:bands" },
-      { text: LABELS.last5, callback_data: "cal:last5" },
+      { text: LABELS.fxbands, callback_data: "cal:fxbands" },
     ],
+    [{ text: LABELS.last5, callback_data: "cal:last5" }],
     [{ text: "« Back", callback_data: "menu" }],
   ],
 };
@@ -490,7 +499,8 @@ async function handleMessage(env, message) {
         "/short (overbought), or /both.\n\n" +
         "Add a date to scan a past session: /scan 2026-09-01\n\n" +
         "/bands lists every ticker with its SMA20 and the prices 2.8% either " +
-        "side of it, and /last ranks them over the last 5 trading days.\n\n" +
+        "side of it, /fx does the same for XAUUSD, ETHUSD, EURUSD, GBPUSD and " +
+        "BTCUSD, and /last ranks the stocks over the last 5 trading days.\n\n" +
         "The /start menu also has \"First 5 days\" — how every ticker did over " +
         "the opening sessions of a month.",
     );

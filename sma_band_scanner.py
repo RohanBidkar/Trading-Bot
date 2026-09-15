@@ -14,11 +14,16 @@ the low band is already taken out, at +BAND_PCT or higher the high one is.
 D22/D15/D5 are the % change over the last 22, 15 and 5 trading sessions, and
 RSI14 is the 14-day RSI.
 
+--forex runs the same table for FOREX_PAIRS instead of the stock watchlist.
+Yahoo has no spot gold, so XAUUSD is read from gold futures (GC=F). Crypto
+trades every day, so its SMA20 and D-columns count calendar days.
+
 Usage:
     python sma_band_scanner.py
     python sma_band_scanner.py --as-of 2026-09-01          # print only
     python sma_band_scanner.py --as-of 2026-09-01 --send   # and send
     python sma_band_scanner.py --band 3.0                  # a different band
+    python sma_band_scanner.py --forex                     # the forex pairs
 """
 
 from datetime import date
@@ -41,6 +46,14 @@ from scanner_core import (
 # ---------------- CONFIG ----------------
 BAND_PCT = 2.8            # distance either side of SMA20, in percent
 MOVE_DAYS = (22, 15, 5)   # trading-day % moves, the first columns after STK
+# Display name -> Yahoo Finance symbol, for --forex.
+FOREX_PAIRS = {
+    "XAUUSD": "GC=F",       # gold futures; Yahoo carries no spot gold
+    "ETHUSD": "ETH-USD",
+    "EURUSD": "EURUSD=X",
+    "GBPUSD": "GBPUSD=X",
+    "BTCUSD": "BTC-USD",
+}
 # Telegram rejects anything over 4096 characters, so a long table goes out in
 # several messages rather than failing as one.
 MAX_MESSAGE_CHARS = 3500
@@ -56,10 +69,16 @@ def levels(m: dict, band: float) -> dict:
     }
 
 
-def format_table(rows: list, band: float) -> str:
+def price(value: float, width: int) -> str:
+    """A price with as many decimals as its size needs (EURUSD vs BTCUSD)."""
+    decimals = 4 if value < 10 else 2 if value < 10000 else 0
+    return f"{value:>{width}.{decimals}f}"
+
+
+def format_table(rows: list, band: float, label: str = "STK") -> str:
     """Fixed-width table so the columns line up in a monospace block."""
     header = (
-        f"{'STK':<6}"
+        f"{label:<6}"
         + "".join(f"{f'D{n}':>7}" for n in MOVE_DAYS)
         + f"{'DIFF':>7}{f'RSI{RSI_LEN}':>7}{f'SMA{SMA_LEN}':>8}{'CLOSE':>8}"
         f"{f'-{band:.1f}%':>9}{f'+{band:.1f}%':>9}"
@@ -71,26 +90,26 @@ def format_table(rows: list, band: float) -> str:
             + "".join(f"{m[f'd{n}']:>6.1f}%" for n in MOVE_DAYS)
             + f"{m['diff']:>6.1f}%"
             f"{m['rsi']:>7.1f}"
-            f"{m['sma']:>8.2f}"
-            f"{m['close']:>8.2f}"
-            f"{m['low']:>9.2f}"
-            f"{m['high']:>9.2f}"
+            + price(m["sma"], 8)
+            + price(m["close"], 8)
+            + price(m["low"], 9)
+            + price(m["high"], 9)
         )
     return "\n".join(lines)
 
 
-def chunk_rows(rows: list, band: float) -> list:
+def chunk_rows(rows: list, band: float, label: str = "STK") -> list:
     """Split into as many tables as it takes to stay under Telegram's cap."""
     tables, batch = [], []
     for row in rows:
         candidate = batch + [row]
-        if batch and len(format_table(candidate, band)) > MAX_MESSAGE_CHARS:
-            tables.append(format_table(batch, band))
+        if batch and len(format_table(candidate, band, label)) > MAX_MESSAGE_CHARS:
+            tables.append(format_table(batch, band, label))
             batch = [row]
         else:
             batch = candidate
     if batch:
-        tables.append(format_table(batch, band))
+        tables.append(format_table(batch, band, label))
     return tables
 
 
@@ -101,6 +120,11 @@ def parse_args():
         type=float,
         default=BAND_PCT,
         help=f"distance either side of SMA{SMA_LEN}, in percent (default {BAND_PCT})",
+    )
+    parser.add_argument(
+        "--forex",
+        action="store_true",
+        help=f"scan the forex pairs ({', '.join(FOREX_PAIRS)}) instead of the stocks",
     )
     return parser.parse_args()
 
@@ -114,16 +138,19 @@ def main() -> None:
 
     as_of = date.fromisoformat(args.as_of) if args.as_of else None
     period = LOOKBACK_HISTORICAL if as_of else LOOKBACK
-    name = f"SMA{SMA_LEN} bands ±{band:.1f}%"
+    name = f"{'Forex ' if args.forex else ''}SMA{SMA_LEN} bands ±{band:.1f}%"
+    # Display name -> download symbol; stocks are their own symbol.
+    symbols = FOREX_PAIRS if args.forex else {t: t for t in TICKERS}
+    label = "PAIR" if args.forex else "STK"
 
     rows = []
-    for ticker in TICKERS:
+    for display, symbol in symbols.items():
         try:
-            m = evaluate(ticker, as_of=as_of, period=period, moves=MOVE_DAYS)
+            m = evaluate(symbol, as_of=as_of, period=period, moves=MOVE_DAYS)
             if m is not None:
-                rows.append(levels(m, band))
+                rows.append(levels({**m, "ticker": display}, band))
         except Exception as exc:
-            print(f"Error checking {ticker}: {exc}")
+            print(f"Error checking {display}: {exc}")
 
     if not rows:
         print("No usable data for any ticker.")
@@ -149,7 +176,7 @@ def main() -> None:
         f"of {len(rows)} scanned."
     )
 
-    tables = chunk_rows(rows, band)
+    tables = chunk_rows(rows, band, label)
 
     print(f"\n{plain(title)}\n{subtitle}\n")
     for table in tables:
