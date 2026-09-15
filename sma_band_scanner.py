@@ -11,7 +11,8 @@ where each name would have to trade to reach the band:
 DIFF is where the close sits today, relative to SMA20: at -BAND_PCT or lower
 the low band is already taken out, at +BAND_PCT or higher the high one is.
 
-D22/D15/D5 are the % change over the last 22, 15 and 5 trading sessions.
+D22/D15/D5 are the % change over the last 22, 15 and 5 trading sessions, and
+RSI14 is the 14-day RSI.
 
 Usage:
     python sma_band_scanner.py
@@ -27,6 +28,7 @@ from scanner_core import (
     LOOKBACK,
     LOOKBACK_HISTORICAL,
     NOTIFY_WHEN_EMPTY,
+    RSI_LEN,
     SMA_LEN,
     TICKERS,
     build_parser,
@@ -38,7 +40,7 @@ from scanner_core import (
 
 # ---------------- CONFIG ----------------
 BAND_PCT = 2.8            # distance either side of SMA20, in percent
-MOVE_DAYS = (22, 15, 5)   # trading-day % moves shown before the SMA column
+MOVE_DAYS = (22, 15, 5)   # trading-day % moves, the first columns after STK
 # Telegram rejects anything over 4096 characters, so a long table goes out in
 # several messages rather than failing as one.
 MAX_MESSAGE_CHARS = 3500
@@ -57,21 +59,22 @@ def levels(m: dict, band: float) -> dict:
 def format_table(rows: list, band: float) -> str:
     """Fixed-width table so the columns line up in a monospace block."""
     header = (
-        f"{'STK':<6}{'CLOSE':>8}"
+        f"{'STK':<6}"
         + "".join(f"{f'D{n}':>7}" for n in MOVE_DAYS)
-        + f"{f'SMA{SMA_LEN}':>8}"
-        f"{f'-{band:.1f}%':>9}{f'+{band:.1f}%':>9}{'DIFF':>7}"
+        + f"{'DIFF':>7}{f'RSI{RSI_LEN}':>7}{f'SMA{SMA_LEN}':>8}{'CLOSE':>8}"
+        f"{f'-{band:.1f}%':>9}{f'+{band:.1f}%':>9}"
     )
     lines = [header, "-" * len(header)]
     for m in rows:
         lines.append(
             f"{m['ticker']:<6}"
-            f"{m['close']:>8.2f}"
             + "".join(f"{m[f'd{n}']:>6.1f}%" for n in MOVE_DAYS)
-            + f"{m['sma']:>8.2f}"
+            + f"{m['diff']:>6.1f}%"
+            f"{m['rsi']:>7.1f}"
+            f"{m['sma']:>8.2f}"
+            f"{m['close']:>8.2f}"
             f"{m['low']:>9.2f}"
             f"{m['high']:>9.2f}"
-            f"{m['diff']:>7.1f}%"
         )
     return "\n".join(lines)
 
