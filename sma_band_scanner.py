@@ -11,8 +11,8 @@ where each name would have to trade to reach the band:
 DIFF is where the close sits today, relative to SMA20: at -BAND_PCT or lower
 the low band is already taken out, at +BAND_PCT or higher the high one is.
 
-D22/D15/D5 are the % change over the last 22, 15 and 5 trading sessions, and
-RSI14 is the 14-day RSI.
+D22/D15/D5/D1 are the % change over the last 22, 15, 5 and 1 trading sessions
+(D1 being the last day's move), and RSI14 is the 14-day RSI.
 
 --forex runs the same table for FOREX_PAIRS instead of the stock watchlist.
 Yahoo has no spot gold, so XAUUSD is read from gold futures (GC=F). Crypto
@@ -45,7 +45,7 @@ from scanner_core import (
 
 # ---------------- CONFIG ----------------
 BAND_PCT = 2.8            # distance either side of SMA20, in percent
-MOVE_DAYS = (22, 15, 5)   # trading-day % moves, the first columns after STK
+MOVE_DAYS = (22, 15, 5, 1)  # trading-day % moves, the first columns after STK
 # Display name -> Yahoo Finance symbol, for --forex.
 FOREX_PAIRS = {
     "XAUUSD": "GC=F",       # gold futures; Yahoo carries no spot gold
