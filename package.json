@@ -2,9 +2,11 @@
   "name": "alert-bot",
   "private": true,
   "version": "0.0.0",
-  "description": "Cloudflare Worker that lets Telegram trigger the oversold scanner workflow",
+  "description": "Cloudflare Worker: Telegram menu and the Scanner Desk website for the stock scanners",
   "scripts": {
-    "deploy": "wrangler deploy",
+    "build": "npm run build --prefix web",
+    "dev": "wrangler dev",
+    "deploy": "npm run build --prefix web && wrangler deploy",
     "tail": "wrangler tail",
     "secrets": "wrangler secret list"
   },

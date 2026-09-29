@@ -5,5 +5,22 @@
   "compatibility_date": "2026-09-03",
   "observability": {
     "enabled": true
-  }
+  },
+  // The Scanner Desk website. run_worker_first sends every request through the
+  // Worker, which answers the Telegram webhook and /api itself and hands the
+  // rest to ASSETS.
+  "assets": {
+    "directory": "./web/dist",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  // Runs and results for the website. No database_id: wrangler creates the
+  // database on the first deploy and fills the id in. The tables are created
+  // by the Worker on first use.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "alert-bot"
+    }
+  ]
 }

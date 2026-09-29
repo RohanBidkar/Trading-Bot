@@ -39,6 +39,8 @@ from scanner_core import (
     build_parser,
     evaluate,
     plain,
+    publish_error,
+    publish_result,
     send_telegram,
     sort_by_tier,
 )
@@ -142,6 +144,7 @@ def main() -> None:
     # Display name -> download symbol; stocks are their own symbol.
     symbols = FOREX_PAIRS if args.forex else {t: t for t in TICKERS}
     label = "PAIR" if args.forex else "STK"
+    part = "fxbands" if args.forex else "bands"
 
     rows = []
     for display, symbol in symbols.items():
@@ -154,6 +157,7 @@ def main() -> None:
 
     if not rows:
         print("No usable data for any ticker.")
+        publish_error(part, name, "No usable price data for any ticker. The data source may be down.")
         if NOTIFY_WHEN_EMPTY and not (as_of and not args.send):
             send_telegram(
                 f"⚠️ <b>{escape(name)}</b> — no usable price data for any ticker. "
@@ -177,6 +181,17 @@ def main() -> None:
     )
 
     tables = chunk_rows(rows, band, label)
+
+    columns = ("ticker", "close", "sma", "rsi", "diff", "low", "high", *(f"d{n}" for n in MOVE_DAYS))
+    publish_result(part, {
+        "kind": "bands",
+        "title": name,
+        "bar": bar_date,
+        "band": band,
+        "forex": args.forex,
+        "moves": list(MOVE_DAYS),
+        "rows": [{k: m[k] for k in columns} for m in rows],
+    })
 
     print(f"\n{plain(title)}\n{subtitle}\n")
     for table in tables:

@@ -20,6 +20,8 @@ ticker's **SMA20 and the prices 2.8% either side of it**.
 | `last_five_scanner.py` | GitHub Actions | Trailing 5-session performance ranking (on demand) |
 | `first_five_scanner.py` | GitHub Actions | Month-open performance ranking (on demand) |
 | `telegram_trigger_worker.js` | Cloudflare Workers | Telegram menu to run any of them on demand |
+| `web/` + `web_api.js` | Cloudflare Workers | Scanner Desk website: run any scan and read the results as real tables |
+| `report_status.py` | GitHub Actions | Tells the website when a run starts and finishes |
 
 ## Strategy logic
 
@@ -462,6 +464,80 @@ send `/scan` to your bot. Any other message gets a one-line usage hint back.
 Caveat: `workflow_dispatch` only works once `daily_scan.yml` exists on the
 default branch — push the repo before testing the worker.
 
+## Scanner Desk website
+
+The same scans as the Telegram menu, in the browser, with the results as real
+tables. Telegram wraps anything wider than about 35 characters on a phone; on
+the website every column fits, sorts on click, and scrolls sideways on a phone
+with the ticker pinned.
+
+It is served by the **same Worker** as the Telegram bot: `GET /` is the site,
+`/api/*` is its API (`web_api.js`), and `POST /` is still the Telegram webhook.
+
+```
+ Website ──POST /api/runs──▶ Worker ──workflow_dispatch──▶ GitHub Actions
+    ▲                        (D1)  ◀──POST /api/results──── scanners
+    └──── polls /api/runs ◀───┘
+```
+
+- **Password.** One shared password (`WEB_PASSWORD`). A right answer sets a
+  signed, HttpOnly cookie for 30 days; 8 wrong tries from one IP lock it for
+  15 minutes. Changing the password signs everyone out.
+- **Results stay on the website.** Runs started there pass `telegram: no`, so
+  the scripts skip Telegram (`SEND_TELEGRAM=0`). Scheduled and Telegram runs
+  still post to Telegram as before, **and** show up in the website's history.
+- **Numbers, not text.** Each script posts its rows as JSON next to the
+  Telegram message (`publish_result` in `scanner_core.py`), filed under a run
+  id the Worker created. `report_status.py` marks the run running / done /
+  failed. Scheduled runs get an id of their own (`gh-<run number>`).
+- **Storage** is a D1 database, created by wrangler on the first deploy. The
+  Worker creates its tables on first use, so there is no migration step.
+
+The UI is React (Vite) with components from [React Bits](https://reactbits.dev)
+in `web/src/components/bits/`: SpotlightCard, CountUp, BlurText, ShinyText,
+ClickSpark and the DotGrid behind the login.
+
+### Set it up (once)
+
+```bash
+# 1. Website password and the runner's shared secret, on the Worker
+npx wrangler secret put WEB_PASSWORD
+openssl rand -hex 32                          # use this as RESULTS_SECRET below
+npx wrangler secret put RESULTS_SECRET
+
+# 2. Build the site and deploy (also creates the D1 database)
+npm install && npm install --prefix web
+npm run deploy
+```
+
+3. In GitHub, **Settings → Secrets and variables → Actions**, add
+   `RESULTS_URL` (the Worker URL, e.g. `https://alert-bot.<you>.workers.dev`)
+   and `RESULTS_SECRET` (the same value as step 1).
+4. Push the repo, so the workflow has the new `run_id` / `telegram` inputs.
+   Until then the Worker's dispatches are rejected with a 422.
+
+Open the Worker URL and sign in. Without steps 3–4 the scans still run and
+still post to Telegram; they just never report back to the site.
+
+### Work on it locally
+
+```bash
+printf 'WEB_PASSWORD=pick-one\nRESULTS_SECRET=localtest\n' > .dev.vars
+npm run build && npx wrangler dev            # site + API on http://localhost:8787
+npm run dev --prefix web                     # optional: hot reload on :5173, proxies /api
+```
+
+Point a scanner at it to fill the tables with real data:
+
+```bash
+RESULTS_URL=http://localhost:8787 RESULTS_SECRET=localtest RUN_ID=test-1 \
+  SEND_TELEGRAM=0 SCAN=bands python report_status.py running
+RESULTS_URL=http://localhost:8787 RESULTS_SECRET=localtest RUN_ID=test-1 \
+  SEND_TELEGRAM=0 python sma_band_scanner.py
+RESULTS_URL=http://localhost:8787 RESULTS_SECRET=localtest RUN_ID=test-1 \
+  python report_status.py success
+```
+
 ## Repo layout
 
 ```
@@ -473,7 +549,10 @@ sma_band_scanner.py              # SMA20 +/-2.8% levels for every ticker
 first_five_scanner.py            # month-open performance ranking (on demand)
 requirements.txt                 # pinned yfinance / pandas / requests
 .github/workflows/daily_scan.yml # daily cron + manual trigger with scan input
-telegram_trigger_worker.js       # Cloudflare Worker: Telegram menu -> dispatch
+telegram_trigger_worker.js       # Cloudflare Worker: Telegram menu -> dispatch, routes the site
+web_api.js                       # Worker: website login, runs and results API (D1)
+web/                             # Scanner Desk website (React + Vite + React Bits)
+report_status.py                 # workflow -> website: run started / finished
 set_webhook.py                   # one-time helper to register the webhook
 .env.example                     # variables to fill in locally
 wrangler.jsonc                   # Worker deploy config

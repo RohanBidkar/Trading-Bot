@@ -30,6 +30,8 @@ from scanner_core import (
     format_return_table,
     get_close,
     plain,
+    publish_error,
+    publish_result,
     send_telegram,
     sort_by_tier,
 )
@@ -109,6 +111,7 @@ def main() -> None:
 
     if not rows:
         print("No usable data for any ticker.")
+        publish_error("last5", name, "No usable price data for any ticker. The data source may be down.")
         if NOTIFY_WHEN_EMPTY and not quiet:
             send_telegram(
                 f"⚠️ <b>{escape(name)}</b> — no usable price data for any ticker. "
@@ -145,6 +148,19 @@ def main() -> None:
         f"average {average:+.1f}%, {movers} moved {STRONG_MOVE:.0f}%+"
     )
     print(f"\n{summary}")
+
+    # Same order as the Telegram tables: up first, then down.
+    publish_result("last5", {
+        "kind": "returns",
+        "title": plain(title),
+        "span": span,
+        "sessions": sessions,
+        "strong_move": STRONG_MOVE,
+        "rows": [
+            {k: r[k] for k in ("ticker", "base", "last", "ret", "start", "end")}
+            for r in up + down
+        ],
+    })
 
     body = "\n\n".join([f"{title}\n{escape(subtitle)}", *sections, escape(summary)])
 

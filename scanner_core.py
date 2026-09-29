@@ -10,6 +10,7 @@ standard charting platform. See README for the Adjusted Close tradeoff.
 """
 
 import argparse
+import math
 import os
 import re
 from dataclasses import dataclass
@@ -39,6 +40,18 @@ NOTIFY_WHEN_EMPTY = os.environ.get("NOTIFY_WHEN_EMPTY", "1").strip().lower() not
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN_HERE")
 # One id, or several separated by commas: "123456789,-1001234567890,@mychannel"
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID_HERE")
+
+# Runs dispatched from the website pass SEND_TELEGRAM=0: their results stay on
+# the website. Scheduled and Telegram-started runs leave it on.
+SEND_TELEGRAM = os.environ.get("SEND_TELEGRAM", "1").strip().lower() not in (
+    "0", "false", "no", "off",
+)
+
+# Where the website receives results (see web_api.js). All three are set by
+# the workflow; left unset - e.g. a local run - nothing is posted.
+RESULTS_URL = os.environ.get("RESULTS_URL", "").strip().rstrip("/")
+RESULTS_SECRET = os.environ.get("RESULTS_SECRET", "").strip()
+RUN_ID = os.environ.get("RUN_ID", "").strip()
 
 SMA_LEN = 20
 RSI_LEN = 14
@@ -220,6 +233,10 @@ def _mask(value) -> str:
 
 def send_telegram(message: str) -> None:
     """Send one message, logging which chat each copy actually landed in."""
+    if not SEND_TELEGRAM:
+        print("Telegram delivery is off for this run (SEND_TELEGRAM=0)")
+        return
+
     if TELEGRAM_TOKEN.startswith("YOUR_") or str(TELEGRAM_CHAT_ID).startswith("YOUR_"):
         print("Telegram not configured: TELEGRAM_TOKEN / TELEGRAM_CHAT_ID are placeholders")
         return
@@ -256,6 +273,47 @@ def send_telegram(message: str) -> None:
             print(f"  {_mask(chat_id)} FAILED: {exc}")
 
 
+def _clean(value):
+    """Make metrics JSON-safe: dates as ISO strings, NaN as null, floats rounded."""
+    if isinstance(value, dict):
+        return {k: _clean(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_clean(v) for v in value]
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, float):
+        return None if math.isnan(value) or math.isinf(value) else round(value, 6)
+    return value
+
+
+def publish_result(part: str, data: dict) -> None:
+    """Post one scanner's numbers to the website, next to the Telegram message.
+
+    `part` names the script (oversold, overbought, bands, fxbands, first5,
+    last5), so the two halves of a "both" run land side by side. A failure is
+    logged and never stops the run - Telegram delivery does not depend on it.
+    """
+    if not (RESULTS_URL and RESULTS_SECRET and RUN_ID):
+        return
+    try:
+        resp = requests.post(
+            f"{RESULTS_URL}/api/results",
+            json={"run_id": RUN_ID, "part": part, "data": _clean(data)},
+            headers={"Authorization": f"Bearer {RESULTS_SECRET}"},
+            timeout=15,
+        )
+        if resp.status_code == 200:
+            print(f"Results posted to the website ({part}, run {RUN_ID})")
+        else:
+            print(f"Website rejected the results [{resp.status_code}]: {resp.text[:200]}")
+    except Exception as exc:
+        print(f"Could not post results to the website: {exc}")
+
+
+def publish_error(part: str, title: str, message: str) -> None:
+    publish_result(part, {"kind": "error", "title": title, "message": message})
+
+
 def build_parser(description: str) -> argparse.ArgumentParser:
     """The flags every dated scan shares; callers may add their own."""
     parser = argparse.ArgumentParser(description=description)
@@ -276,8 +334,11 @@ def parse_args(description: str):
     return build_parser(description).parse_args()
 
 
-def run(name: str, setups: list) -> None:
-    """Evaluate every ticker, print each setup's table, send one message."""
+def run(name: str, setups: list, part: str) -> None:
+    """Evaluate every ticker, print each setup's table, send one message.
+
+    `part` is the name the website files these results under.
+    """
     args = parse_args(f"{name} scanner")
 
     as_of = date.fromisoformat(args.as_of) if args.as_of else None
@@ -294,6 +355,7 @@ def run(name: str, setups: list) -> None:
 
     if not metrics:
         print("No usable data for any ticker.")
+        publish_error(part, name, "No usable price data for any ticker. The data source may be down.")
         if NOTIFY_WHEN_EMPTY and not (as_of and not args.send):
             send_telegram(
                 f"⚠️ <b>{escape(name)}</b> — no usable price data for any ticker. "
@@ -306,18 +368,36 @@ def run(name: str, setups: list) -> None:
     print(f"\n{name} — bar {bar_date}")
 
     sections = []
+    web_sections = []
     for setup in setups:
         rows = sort_by_tier(
             [m for m in metrics if setup.predicate(m)],
             setup.key,
             descending=setup.descending,
         )
+        # Every setup goes to the website, empty ones too, so its tab shows 0.
+        web_sections.append({
+            "title": plain(setup.title),
+            "key": setup.key,
+            "rows": [
+                {k: m[k] for k in ("ticker", "close", "sma", "rsi", "diff", "move")}
+                for m in rows
+            ],
+        })
         if not rows:
             continue
         table = format_table(rows, setup)
         print(f"\n{plain(setup.title)}")
         print(table)
         sections.append(f"{setup.title}\n<pre>{escape(table)}</pre>")
+
+    publish_result(part, {
+        "kind": "screen",
+        "title": name,
+        "bar": bar_date,
+        "scanned": len(metrics),
+        "sections": web_sections,
+    })
 
     if sections:
         body = header + "\n\n" + "\n\n".join(sections)

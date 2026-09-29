@@ -20,6 +20,10 @@
  * and "Forex SMA bands" ask first: the latest bar, or a past day from the
  * calendar.
  *
+ * The same Worker also serves the Scanner Desk website (web/, built into
+ * web/dist) and its /api routes - see web_api.js. Runs started from Telegram are
+ * recorded there too, so they show up in the website's history.
+ *
  * Required environment variables / secrets:
  *   TELEGRAM_TOKEN         bot token from @BotFather (used to reply)
  *   TELEGRAM_SECRET_TOKEN  the secret_token you passed to setWebhook
@@ -27,11 +31,15 @@
  *   GITHUB_OWNER           e.g. "RohanBidkar"
  *   GITHUB_REPO            e.g. "Trading-Bot"
  *   GITHUB_BRANCH          e.g. "main"
+ * Website only (see web_api.js):
+ *   WEB_PASSWORD, RESULTS_SECRET, and the DB (D1) and ASSETS bindings
  */
+
+import { createRun, handleApi } from "./web_api.js";
 
 const WORKFLOW_FILE = "daily_scan.yml";
 
-const LABELS = {
+export const LABELS = {
   oversold: "📉 Oversold",
   overbought: "📈 Overbought",
   both: "🔀 Both",
@@ -152,7 +160,7 @@ function monthsBetween(a, b) {
  * a real calendar date (rejects 2026-02-31 via the round-trip), and not in
  * the future.
  */
-function parseAsOf(raw) {
+export function parseAsOf(raw) {
   if (!raw) return { ok: true, value: "" };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     return { ok: false, reason: "Use the format YYYY-MM-DD, e.g. /scan 2026-09-01" };
@@ -173,7 +181,7 @@ function parseAsOf(raw) {
  * valid ones, but callback data arrives over the wire like any other input,
  * so it is checked here rather than trusted downstream.
  */
-function parseMonth(raw) {
+export function parseMonth(raw) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(raw ?? "")) {
     return { ok: false, reason: "Expected a month in YYYY-MM form." };
   }
@@ -318,7 +326,17 @@ function editMessage(env, chatId, messageId, text, replyMarkup) {
 
 /* --------------------------------- github --------------------------------- */
 
-async function triggerWorkflow(env, scan, asOf, month) {
+/** Short, URL-safe id the scanners echo back with their results. */
+export function newRunId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(6));
+  return "r_" + Array.from(bytes, b => (b % 36).toString(36)).join("");
+}
+
+/**
+ * `runId` ties the GitHub run to a row on the website; `telegram` is "yes" to
+ * deliver to TELEGRAM_CHAT_ID as before, "no" to keep results on the website.
+ */
+export async function triggerWorkflow(env, scan, asOf, month, runId = "", telegram = "yes") {
   const url =
     `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}` +
     `/actions/workflows/${WORKFLOW_FILE}/dispatches`;
@@ -337,7 +355,7 @@ async function triggerWorkflow(env, scan, asOf, month) {
     // missing input is a 422.
     body: JSON.stringify({
       ref: env.GITHUB_BRANCH,
-      inputs: { scan, as_of: asOf ?? "", month: month ?? "" },
+      inputs: { scan, as_of: asOf ?? "", month: month ?? "", run_id: runId, telegram },
     }),
   });
 
@@ -349,7 +367,18 @@ async function triggerWorkflow(env, scan, asOf, month) {
 }
 
 async function runScan(env, chatId, scan, asOf = "", month = "") {
-  const result = await triggerWorkflow(env, scan, asOf, month);
+  // Record the run for the website's history. Telegram must keep working
+  // without the database, so a failure here only costs the history entry.
+  let runId = "";
+  if (env.DB) {
+    try {
+      runId = (await createRun(env, { id: newRunId(), scan, asOf, month, source: "Telegram" })).id;
+    } catch (err) {
+      console.error("Could not record the run:", err);
+    }
+  }
+
+  const result = await triggerWorkflow(env, scan, asOf, month, runId, "yes");
 
   if (result.ok) {
     const when = month ? ` for ${month}` : asOf ? ` as of ${asOf}` : "";
@@ -507,35 +536,55 @@ async function handleMessage(env, message) {
   }
 }
 
+async function handleTelegram(request, env) {
+  const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
+  if (!env.TELEGRAM_SECRET_TOKEN || secret !== env.TELEGRAM_SECRET_TOKEN) {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  let update;
+  try {
+    update = await request.json();
+  } catch {
+    return new Response("Bad request", { status: 400 });
+  }
+
+  // Always return 200 so Telegram does not retry the update.
+  try {
+    if (update.callback_query) {
+      await handleCallback(env, update.callback_query);
+    } else {
+      await handleMessage(env, update.message ?? update.edited_message);
+    }
+  } catch (err) {
+    console.error("Unhandled error:", err);
+  }
+
+  return new Response("OK");
+}
+
 export default {
   async fetch(request, env) {
-    if (request.method !== "POST") {
-      return new Response("Method not allowed", { status: 405 });
-    }
+    const url = new URL(request.url);
 
-    const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
-    if (!env.TELEGRAM_SECRET_TOKEN || secret !== env.TELEGRAM_SECRET_TOKEN) {
-      return new Response("Forbidden", { status: 403 });
-    }
-
-    let update;
-    try {
-      update = await request.json();
-    } catch {
-      return new Response("Bad request", { status: 400 });
-    }
-
-    // Always return 200 so Telegram does not retry the update.
-    try {
-      if (update.callback_query) {
-        await handleCallback(env, update.callback_query);
-      } else {
-        await handleMessage(env, update.message ?? update.edited_message);
+    if (url.pathname.startsWith("/api/")) {
+      try {
+        return await handleApi(request, env, url);
+      } catch (err) {
+        console.error("API error:", err);
+        return Response.json({ error: "Something went wrong on the server." }, { status: 500 });
       }
-    } catch (err) {
-      console.error("Unhandled error:", err);
     }
 
-    return new Response("OK");
+    // The Telegram webhook stays at the root, where setWebhook points it.
+    if (request.method === "POST") {
+      return handleTelegram(request, env);
+    }
+
+    if ((request.method === "GET" || request.method === "HEAD") && env.ASSETS) {
+      return env.ASSETS.fetch(request);
+    }
+
+    return new Response("Method not allowed", { status: 405 });
   },
 };

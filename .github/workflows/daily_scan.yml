@@ -1,4 +1,6 @@
 name: Daily Stock Scan
+# Shows which scan each run was in the Actions list.
+run-name: ${{ github.event_name == 'schedule' && 'Daily scan' || format('{0} {1}{2}', inputs.scan, inputs.as_of, inputs.month) }}
 
 on:
   schedule:
@@ -29,21 +31,45 @@ on:
         type: string
         required: false
         default: ""
+      run_id:
+        description: "Website run id the results are filed under. Blank = a new one."
+        type: string
+        required: false
+        default: ""
+      telegram:
+        description: "Also send to Telegram? The website sends no."
+        type: choice
+        default: "yes"
+        options:
+          - "yes"
+          - "no"
 
 env:
   # Scheduled runs have no inputs, so default them to "both" / latest bar.
   SCAN: ${{ github.event.inputs.scan || 'both' }}
   AS_OF: ${{ github.event.inputs.as_of || '' }}
   MONTH: ${{ github.event.inputs.month || '' }}
+  # Scheduled and hand-started runs get an id of their own on the website.
+  RUN_ID: ${{ github.event.inputs.run_id || format('gh-{0}', github.run_id) }}
+  SEND_TELEGRAM: ${{ github.event.inputs.telegram == 'no' && '0' || '1' }}
 
 jobs:
   scan:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    # Where the scanners post their numbers for the website. Both unset = no
+    # website, and the scan works exactly as before.
+    env:
+      RESULTS_URL: ${{ secrets.RESULTS_URL }}
+      RESULTS_SECRET: ${{ secrets.RESULTS_SECRET }}
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Tell the website the run started
+        run: python3 report_status.py running
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -143,3 +169,9 @@ jobs:
           else
             python first_five_scanner.py
           fi
+
+      - name: Tell the website the run finished
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: python3 report_status.py "$JOB_STATUS"

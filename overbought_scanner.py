@@ -56,4 +56,4 @@ SETUPS = [
 
 
 if __name__ == "__main__":
-    run("Overbought scan", SETUPS)
+    run("Overbought scan", SETUPS, part="overbought")
