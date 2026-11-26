@@ -2,13 +2,13 @@
 Year movement - how far every ticker has moved over ten lookbacks.
 
 Not a screen: no ticker is filtered out. For each one it prints the % change
-in the close over the last 1, 5, 15, 22, 30, 50, 100, 200, 300 and 400
-trading days (D1 ... D400), measured from the close N sessions back. A ticker
-without enough history for a window (a recent listing) shows "-" there
-instead of being dropped.
+in the close over the last 400, 350, 300, 250, 200, 150, 100, 50, 35, 22 and
+15 trading days (D400 ... D15, longest first), measured from the close N
+sessions back, then the close itself. A ticker without enough history for a
+window (a recent listing) shows "-" there instead of being dropped.
 
 Rows are split under/over $100 like the other reports, each tier sorted by
-D1, biggest gain first. The website table can re-sort on any column.
+D15, biggest gain first. The website table can re-sort on any column.
 
     python year_move_scanner.py                       # latest bar
     python year_move_scanner.py --as-of 2026-03-02    # a past session (local only)
@@ -32,8 +32,9 @@ from scanner_core import (
 )
 
 # ---------------- CONFIG ----------------
-MOVE_DAYS = (1, 5, 15, 22, 30, 50, 100, 200, 300, 400)   # trading days back
-SORT_BY = "d1"
+# Trading days back, in column order: longest first, Close after the last.
+MOVE_DAYS = (400, 350, 300, 250, 200, 150, 100, 50, 35, 22, 15)
+SORT_BY = "d15"
 
 # D400 needs 401 sessions (~1.6 years). Backdated runs go up to 24 months
 # back, so they download more.
@@ -71,12 +72,13 @@ def fmt_pct(value, width: int) -> str:
 def format_table(rows: list) -> str:
     """Fixed-width table so the columns line up in a monospace block."""
     w = stk_width(rows)
-    header = f"{'STK':<{w}}{'CLOSE':>9}" + "".join(f"{f'D{n}':>7}" for n in MOVE_DAYS)
+    header = f"{'STK':<{w}}" + "".join(f"{f'D{n}':>7}" for n in MOVE_DAYS) + f"{'CLOSE':>9}"
     lines = [header, "-" * len(header)]
     for m in rows:
         lines.append(
-            f"{m['ticker']:<{w}}{m['close']:>9.2f}"
+            f"{m['ticker']:<{w}}"
             + "".join(fmt_pct(m[f"d{n}"], 7) for n in MOVE_DAYS)
+            + f"{m['close']:>9.2f}"
         )
     return "\n".join(lines)
 
@@ -97,7 +99,7 @@ def chunk_rows(rows: list) -> list:
 
 
 def main() -> None:
-    args = build_parser("Year movement: D1 to D400 for every ticker").parse_args()
+    args = build_parser("Year movement: D400 to D15 for every ticker").parse_args()
     as_of = date.fromisoformat(args.as_of) if args.as_of else None
     period = PERIOD_HISTORICAL if as_of else PERIOD
     name = "Year movement"
@@ -127,18 +129,18 @@ def main() -> None:
     rows = sort_by_tier(rows, "_sort", descending=True)
 
     bar_date = max(m["date"] for m in rows)
-    up_1 = len([m for m in rows if (m["d1"] or 0) > 0])
+    up_15 = len([m for m in rows if (m["d15"] or 0) > 0])
     up_200 = len([m for m in rows if (m["d200"] or 0) > 0])
     short = len([m for m in rows if m["d400"] is None])
 
     title = f"<b>{escape(name)}</b> — bar {bar_date}"
     subtitle = (
-        f"% change in the close over N trading days. {up_1} of {len(rows)} up on the day, "
+        f"% change in the close over N trading days. {up_15} of {len(rows)} up over 15 days, "
         f"{up_200} up over 200 days."
         + (f" {short} without 400 days of history (shown as -)." if short else "")
     )
 
-    columns = ("ticker", "close", *(f"d{n}" for n in MOVE_DAYS))
+    columns = ("ticker", *(f"d{n}" for n in MOVE_DAYS), "close")
     publish_result("moves", {
         "kind": "moves",
         "title": name,

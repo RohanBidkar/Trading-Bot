@@ -9,7 +9,7 @@ export const SCANS = {
   fxbands: { name: "Forex bands", desc: "Same levels for gold, crypto and majors", tag: "Levels", icon: "fx" },
   last5: { name: "Last 5 days", desc: "Ranking over the latest five sessions", tag: "Ranking", icon: "clock" },
   first5: { name: "First 5 days", desc: "How the month opened, for any month", tag: "Ranking", icon: "cal" },
-  moves: { name: "Year movement", desc: "Every ticker's move over D1, D5, D15 … D400", tag: "Movement", icon: "trend", span: true },
+  moves: { name: "Year movement", desc: "Every ticker's move over D400, D350 … D22, D15", tag: "Movement", icon: "trend", span: true },
 };
 export const SCAN_ORDER = ["oversold", "overbought", "both", "bands", "fxbands", "last5", "first5", "moves"];
 

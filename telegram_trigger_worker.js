@@ -13,7 +13,7 @@
  *   /bands [YYYY-MM-DD]    SMA20 levels 2.8% either side, every ticker
  *   /fx [YYYY-MM-DD]       the same levels for XAUUSD, ETHUSD, EURUSD, GBPUSD, BTCUSD
  *   /last [YYYY-MM-DD]     ranking over the last 5 trading days
- *   /moves [YYYY-MM-DD]    year movement: D1 to D400 for every ticker
+ *   /moves [YYYY-MM-DD]    year movement: D400 to D15 for every ticker
  *
  * The /start menu also offers "First 5 days": how every ticker did over the
  * opening sessions of a month, chosen from a month grid. Its rolling twin,
@@ -539,7 +539,7 @@ async function handleMessage(env, message) {
         "/bands lists every ticker with its SMA20 and the prices 2.8% either " +
         "side of it, /fx does the same for XAUUSD, ETHUSD, EURUSD, GBPUSD and " +
         "BTCUSD, /last ranks the stocks over the last 5 trading days, and " +
-        "/moves shows every ticker's move over 1 to 400 trading days.\n\n" +
+        "/moves shows every ticker's move over 400 down to 15 trading days.\n\n" +
         "The /start menu also has \"First 5 days\" — how every ticker did over " +
         "the opening sessions of a month.",
     );
