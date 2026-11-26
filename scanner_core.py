@@ -13,6 +13,7 @@ import argparse
 import math
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import date
 from html import escape
@@ -151,8 +152,20 @@ def compute_rsi(series: pd.Series, length: int = RSI_LEN) -> pd.Series:
     return rsi.where(avg_loss != 0, 100.0)
 
 
-def get_close(ticker: str, period: str = LOOKBACK) -> pd.Series:
-    """Download daily bars and return the raw (unadjusted) Close series.
+# ---------------- PRICE DOWNLOADS ----------------
+# The watchlist is fetched in batches instead of one request per ticker, and
+# kept in a short-lived file cache so the second script of a "both" run (a
+# separate process in the same job) reuses the first one's download.
+BATCH_SIZE = 50
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".price_cache")
+CACHE_TTL = 30 * 60     # seconds; long enough for one workflow run
+
+_closes = {}            # period -> {ticker: Close series}
+_batched = set()        # periods whose watchlist batch already ran
+
+
+def _download_one(ticker: str, period: str) -> pd.Series:
+    """Download one ticker's daily bars and return the raw (unadjusted) Close.
 
     auto_adjust=False is essential: newer yfinance defaults it to True, which
     back-adjusts 'Close' for dividends and splits. We want the untouched
@@ -178,6 +191,98 @@ def get_close(ticker: str, period: str = LOOKBACK) -> pd.Series:
         raise ValueError("'Close' column missing from response")
 
     return df["Close"].dropna()
+
+
+def _download_batch(tickers: list, period: str) -> dict:
+    """Close series for many tickers, BATCH_SIZE per request. Misses are left out."""
+    out = {}
+    for i in range(0, len(tickers), BATCH_SIZE):
+        chunk = tickers[i:i + BATCH_SIZE]
+        try:
+            df = yf.download(
+                chunk,
+                period=period,
+                interval="1d",
+                auto_adjust=False,   # raw printed close, as in _download_one
+                progress=False,
+                threads=True,
+                group_by="column",
+            )
+        except Exception as exc:
+            print(f"Batch download failed ({exc}); fetching those {len(chunk)} one by one")
+            continue
+        if df is None or df.empty or not isinstance(df.columns, pd.MultiIndex):
+            continue
+        if "Close" not in df.columns.get_level_values(0):
+            continue
+        close = df["Close"]
+        for t in chunk:
+            if t in close.columns:
+                # Mixed exchanges share one date index; each ticker's own
+                # non-trading days come back as NaN and are dropped here.
+                series = close[t].dropna()
+                if not series.empty:
+                    out[t] = series
+    return out
+
+
+def _cache_path(period: str) -> str:
+    return os.path.join(CACHE_DIR, f"close_{re.sub(r'[^A-Za-z0-9]', '', period)}.pkl")
+
+
+def _read_cache(period: str) -> dict:
+    """This period's cached closes, if written by this run (younger than CACHE_TTL)."""
+    path = _cache_path(period)
+    try:
+        if time.time() - os.path.getmtime(path) < CACHE_TTL:
+            data = pd.read_pickle(path)   # only ever a file this module wrote
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
+
+
+def _write_cache(period: str, closes: dict) -> None:
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        tmp = _cache_path(period) + ".tmp"
+        pd.to_pickle(closes, tmp)
+        os.replace(tmp, _cache_path(period))
+    except Exception as exc:
+        print(f"Could not write the price cache: {exc}")
+
+
+def get_close(ticker: str, period: str = LOOKBACK) -> pd.Series:
+    """The raw (unadjusted) daily Close for one ticker.
+
+    The first watchlist ticker asked for triggers one batched download of the
+    whole watchlist for that period; later calls are served from memory. A
+    ticker the batch missed - and any symbol not on the watchlist, such as the
+    forex pairs - is downloaded on its own, exactly as before.
+    """
+    if period not in _closes:
+        _closes[period] = _read_cache(period)
+        if _closes[period]:
+            print(f"Prices: reusing {len(_closes[period])} cached tickers ({period})")
+    cache = _closes[period]
+
+    if ticker not in cache and ticker in TICKERS and period not in _batched:
+        _batched.add(period)
+        missing = [t for t in TICKERS if t not in cache]
+        started = time.time()
+        got = _download_batch(missing, period)
+        print(f"Prices: {len(got)}/{len(missing)} tickers in one batch ({period}, {time.time() - started:.1f}s)")
+        cache.update(got)
+        if got:
+            _write_cache(period, cache)
+
+    if ticker in cache:
+        return cache[ticker]
+
+    series = _download_one(ticker, period)
+    cache[ticker] = series
+    return series
 
 
 def evaluate(ticker: str, as_of: date = None, period: str = LOOKBACK, moves: tuple = ()):

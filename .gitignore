@@ -68,3 +68,6 @@ pnpm-debug.log*
 .DS_Store
 *.swp
 *.swo
+
+# Scanner price cache (scanner_core.py)
+.price_cache/
