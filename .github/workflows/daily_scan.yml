@@ -34,6 +34,11 @@ on:
         type: string
         required: false
         default: ""
+      group:
+        description: "Watchlist group id from the website (g_...). Blank = every group."
+        type: string
+        required: false
+        default: ""
       telegram:
         description: "Also send to Telegram? The website sends no."
         type: choice
@@ -49,6 +54,8 @@ env:
   # Runs started from the Actions tab get an id of their own on the website.
   RUN_ID: ${{ github.event.inputs.run_id || format('gh-{0}', github.run_id) }}
   SEND_TELEGRAM: ${{ github.event.inputs.telegram == 'no' && '0' || '1' }}
+  # Read by load_tickers() in scanner_core.py; blank = every group.
+  WATCHLIST_GROUP: ${{ github.event.inputs.group || '' }}
 
 jobs:
   scan:

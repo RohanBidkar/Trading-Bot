@@ -68,13 +68,23 @@ Shared settings — `SMA_LEN`, `RSI_LEN`, `PRICE_TIER`,
 `MOVE_LOOKBACK` — live in `scanner_core.py`.
 
 **The watchlist is edited on the website** (the Watchlist button in the top
-bar). Add any Yahoo Finance symbol, such as `AAPL`, `BRK-B`, `RELIANCE.NS` or
-`^GSPC`. Each one is checked against Yahoo before it is saved, and you can add
-up to 200 tickers. The list lives in D1, and every scan fetches it at startup
-from `/api/results/watchlist`. If that fetch fails, or on a local run without
-`RESULTS_URL`, the scan falls back to `DEFAULT_TICKERS` in `scanner_core.py`.
-That list is also what "Reset to built-in" restores, so keep it in step with
-`DEFAULT_TICKERS` in `web_api.js`.
+bar). Tickers live in named **groups**. You can create, rename and delete
+groups, search Yahoo Finance by company name to add tickers, and move tickers
+between groups. A ticker can sit in more than one group. Each symbol is checked
+against Yahoo before it is saved, and the list holds up to 200 distinct
+tickers.
+
+Scans run on **all groups** (every ticker once) or on **one group**, picked
+under "Tickers" in the New scan panel or with "Scan group" on the Watchlist
+page. The group id travels as the workflow's `group` input
+(`WATCHLIST_GROUP`), and each scanner fetches its tickers at startup from
+`/api/results/watchlist?group=`. Telegram-started runs scan all groups.
+
+The groups are stored in D1 (`settings` table). If the fetch fails, or on a
+local run without `RESULTS_URL`, a scan falls back to `DEFAULT_TICKERS` in
+`scanner_core.py`. "Reset to built-in" restores `DEFAULT_GROUPS` in
+`web_api.js` (Group A and Group B, the two blocks of the original list). Keep
+the two in step.
 
 Note the two sides are not symmetric in practice. On this list the binding
 constraint for the short side is the **distance** requirement, not RSI: these

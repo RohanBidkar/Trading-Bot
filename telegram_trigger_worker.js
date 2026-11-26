@@ -335,8 +335,9 @@ export function newRunId() {
 /**
  * `runId` ties the GitHub run to a row on the website; `telegram` is "yes" to
  * deliver to TELEGRAM_CHAT_ID as before, "no" to keep results on the website.
+ * `group` is a watchlist group id from the website; "" scans every group.
  */
-export async function triggerWorkflow(env, scan, asOf, month, runId = "", telegram = "yes") {
+export async function triggerWorkflow(env, scan, asOf, month, runId = "", telegram = "yes", group = "") {
   const url =
     `https://api.github.com/repos/${env.GITHUB_OWNER}/${env.GITHUB_REPO}` +
     `/actions/workflows/${WORKFLOW_FILE}/dispatches`;
@@ -355,7 +356,7 @@ export async function triggerWorkflow(env, scan, asOf, month, runId = "", telegr
     // missing input is a 422.
     body: JSON.stringify({
       ref: env.GITHUB_BRANCH,
-      inputs: { scan, as_of: asOf ?? "", month: month ?? "", run_id: runId, telegram },
+      inputs: { scan, as_of: asOf ?? "", month: month ?? "", run_id: runId, telegram, group },
     }),
   });
 

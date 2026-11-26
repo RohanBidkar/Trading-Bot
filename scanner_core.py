@@ -57,27 +57,40 @@ RESULTS_SECRET = os.environ.get("RESULTS_SECRET", "").strip()
 RUN_ID = os.environ.get("RUN_ID", "").strip()
 
 
-def load_tickers() -> list:
-    """The website's watchlist, or DEFAULT_TICKERS if it can't be fetched.
+# A watchlist group id from the website (set by the workflow); blank = all.
+WATCHLIST_GROUP = os.environ.get("WATCHLIST_GROUP", "").strip()
+# The group's name once loaded, shown at the top of Telegram messages.
+WATCHLIST_LABEL = ""
 
-    A failed fetch never stops a scan - it just runs on the built-in list.
+
+def load_tickers() -> list:
+    """The website's watchlist (one group, or all), else DEFAULT_TICKERS.
+
+    A failed fetch never stops a scan - it runs on the built-in list and says so.
     """
+    global WATCHLIST_LABEL
     if not (RESULTS_URL and RESULTS_SECRET):
         return list(DEFAULT_TICKERS)
     try:
         resp = requests.get(
             f"{RESULTS_URL}/api/results/watchlist",
+            params={"group": WATCHLIST_GROUP} if WATCHLIST_GROUP else None,
             headers={"Authorization": f"Bearer {RESULTS_SECRET}"},
             timeout=15,
         )
         resp.raise_for_status()
-        tickers = [str(t).strip().upper() for t in resp.json().get("tickers", []) if str(t).strip()]
+        data = resp.json()
+        tickers = [str(t).strip().upper() for t in data.get("tickers", []) if str(t).strip()]
         if tickers:
-            print(f"Watchlist: {len(tickers)} tickers from the website")
+            group = data.get("group") or {}
+            WATCHLIST_LABEL = group.get("name", "")
+            print(f"Watchlist: {len(tickers)} tickers from the website ({WATCHLIST_LABEL or 'all groups'})")
             return tickers
         print("Website returned an empty watchlist; using the built-in list")
     except Exception as exc:
         print(f"Could not fetch the watchlist ({exc}); using the built-in list")
+    if WATCHLIST_GROUP:
+        WATCHLIST_LABEL = "built-in list (group unavailable)"
     return list(DEFAULT_TICKERS)
 
 
@@ -282,6 +295,9 @@ def send_telegram(message: str) -> None:
     if not recipients:
         print("Telegram not configured: TELEGRAM_CHAT_ID is empty")
         return
+
+    if WATCHLIST_LABEL:
+        message = f"🗂 <i>{escape(WATCHLIST_LABEL)}</i>\n" + message
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     print(f"Sending to {len(recipients)} recipient(s) with token {_mask(TELEGRAM_TOKEN)}")

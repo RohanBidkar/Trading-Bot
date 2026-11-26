@@ -108,7 +108,35 @@ function MonthGrid({ value, onPick }) {
   );
 }
 
-export default function Wizard({ onRun, runs }) {
+/** Which tickers the scan runs on: every group, or one. Forex has its own pairs. */
+function GroupPicker({ scan, groups, total, value, onChange }) {
+  if (scan === "fxbands") {
+    return (
+      <div className="scope">
+        <span className="scope-label"><Icon name="folder" size={14} /> Tickers</span>
+        <span className="scope-fixed">Forex pairs (fixed list)</span>
+      </div>
+    );
+  }
+  return (
+    <label className="scope">
+      <span className="scope-label"><Icon name="folder" size={14} /> Tickers</span>
+      <span className="scope-select">
+        <select value={value} onChange={e => onChange(e.target.value)} aria-label="Watchlist group to scan">
+          <option value="">All groups · {total}</option>
+          {groups.map(g => (
+            <option key={g.id} value={g.id} disabled={g.tickers.length === 0}>
+              {g.name} · {g.tickers.length}
+            </option>
+          ))}
+        </select>
+        <Icon name="chevR" size={13} className="scope-caret" />
+      </span>
+    </label>
+  );
+}
+
+export default function Wizard({ onRun, runs, groups = [], total = 0, group = "", onGroupChange }) {
   const [step, setStep] = useState("scan"); // scan | when | date | month
   const [dir, setDir] = useState(1);
   const [scan, setScan] = useState(null);
@@ -130,13 +158,16 @@ export default function Wizard({ onRun, runs }) {
   };
 
   const ready = scan && (scan === "first5" ? !!month : when === "latest" || (when === "date" && !!date));
+  // A group deleted on the Watchlist page falls back to every group.
+  const activeGroup = groups.find(g => g.id === group) ?? null;
+  const groupId = scan === "fxbands" ? "" : activeGroup?.id ?? "";
 
   const run = async () => {
     if (!ready || busy) return;
     setBusy(true);
     setError("");
     try {
-      await onRun({ scan, asOf: when === "date" ? date : "", month: scan === "first5" ? month : "" });
+      await onRun({ scan, asOf: when === "date" ? date : "", month: scan === "first5" ? month : "", group: groupId });
       reset();
       go("scan", -1);
     } catch (err) {
@@ -234,13 +265,14 @@ export default function Wizard({ onRun, runs }) {
           </span>
         ))}
       </nav>
+      <GroupPicker scan={scan} groups={groups} total={total} value={activeGroup?.id ?? ""} onChange={onGroupChange} />
       <div className="step-viewport">
         <div key={step} className={`step ${dir < 0 ? "back" : ""}`}>{body}</div>
       </div>
       <div className="wizard-foot">
         <ClickSpark sparkColor={colors["--accent"]} sparkSize={9} sparkRadius={22} sparkCount={10} duration={450}>
           <div className="wizard-foot-inner">
-            <div className="selection">{scan ? <><strong>{SCANS[scan].name}</strong> · {whenText}</> : "Choose a scan to start"}</div>
+            <div className="selection">{scan ? <><strong>{SCANS[scan].name}</strong> · {whenText}{groupId && <> · <strong>{activeGroup.name}</strong></>}</> : "Choose a scan to start"}</div>
             <button type="button" className="btn-primary" disabled={!ready || busy} onClick={run}>
               {busy ? <span className="spinner" aria-hidden="true" /> : <Icon name="play" size={13} />} Run scan
             </button>

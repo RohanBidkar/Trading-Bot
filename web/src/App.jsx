@@ -26,6 +26,8 @@ function Desk({ onSignedOut }) {
   const resultsRef = useRef(null);
   const [railOpen, setRailOpen] = useState(storedRail);
   const [view, setView] = useState("runs"); // runs | watchlist
+  const [watchlist, setWatchlist] = useState(null); // { groups, total, names, custom }
+  const [scanGroup, setScanGroup] = useState(""); // "" = every group
 
   const toggleRail = () => {
     setRailOpen(open => {
@@ -58,6 +60,18 @@ function Desk({ onSignedOut }) {
     window.addEventListener("focus", onFocus);
     return () => { clearInterval(t); window.removeEventListener("focus", onFocus); };
   }, [refresh, anyActive]);
+
+  // The groups feed both the Watchlist page and the wizard's group picker.
+  useEffect(() => {
+    api.watchlist().then(setWatchlist).catch(guard);
+  }, [guard]);
+
+  const scanOnGroup = id => {
+    setScanGroup(id);
+    setView("runs");
+    if (!railOpen) toggleRail();
+    if (window.innerWidth <= 980) window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   const active = runs?.find(r => r.id === activeId) ?? null;
 
@@ -96,7 +110,9 @@ function Desk({ onSignedOut }) {
   };
 
   let pane;
-  if (view === "watchlist") pane = <Watchlist onSignedOut={onSignedOut} />;
+  if (view === "watchlist") {
+    pane = <Watchlist watchlist={watchlist} onChange={setWatchlist} onScanGroup={scanOnGroup} onSignedOut={onSignedOut} />;
+  }
   else if (!runs) pane = <section className="panel notice"><p>Loading runs…</p></section>;
   else if (!active) {
     pane = (
@@ -139,7 +155,8 @@ function Desk({ onSignedOut }) {
       </header>
       <div className={`layout ${railOpen ? "" : "rail-closed"}`}>
         <aside className="rail" id="rail" inert={railOpen ? undefined : ""} aria-hidden={!railOpen}>
-          <Wizard onRun={startRun} runs={runs ?? []} />
+          <Wizard onRun={startRun} runs={runs ?? []} groups={watchlist?.groups ?? []} total={watchlist?.total ?? 0}
+            group={scanGroup} onGroupChange={setScanGroup} />
           <History runs={runs ?? []} activeId={activeId} onSelect={selectRun} />
         </aside>
         <main className="results" ref={resultsRef}>{pane}</main>

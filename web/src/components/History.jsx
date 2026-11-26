@@ -24,7 +24,7 @@ export default function History({ runs, activeId, onSelect }) {
                   <span className={`spot-icon ${scan.tone ?? ""}`}><Icon name={scan.icon ?? "bands"} size={15} /></span>
                   <span style={{ minWidth: 0 }}>
                     <div className="hist-title">{runLabel(r)}</div>
-                    <div className="hist-meta"><span className="src">{r.source}</span><span>{relTime(r.createdAt)}</span></div>
+                    <div className="hist-meta"><span className="src">{r.source}</span>{r.group && <span className="src grp" title={`Group: ${r.group}`}>{r.group}</span>}<span>{relTime(r.createdAt)}</span></div>
                   </span>
                   <span className={`status ${tone}`}><i className="s-dot" />{STATUS_TEXT[r.status] ?? r.status}</span>
                 </button>

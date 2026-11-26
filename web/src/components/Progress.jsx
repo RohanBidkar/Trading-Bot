@@ -26,7 +26,7 @@ export default function Progress({ run, parts }) {
 
   return (
     <section className="panel progress" aria-live="polite">
-      <span className="eyebrow">{run.source} · {run.id}</span>
+      <span className="eyebrow">{run.source}{run.group ? ` · ${run.group}` : ""} · {run.id}</span>
       <h1 className="report-title">
         <ShinyText text={runLabel(run)} color="var(--muted)" shineColor="var(--fg)" speed={1.8} />
       </h1>

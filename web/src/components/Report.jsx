@@ -82,7 +82,7 @@ export default function Report({ run, parts }) {
     <section className="panel" aria-label="Results">
       <div className="report-head">
         <div style={{ minWidth: 0 }}>
-          <span className="eyebrow">{scan.tag} · {run.source}</span>
+          <span className="eyebrow">{scan.tag} · {run.source}{run.group ? ` · ${run.group}` : ""}</span>
           <BlurText key={run.id} text={report.title} className="report-title blur" delay={70} stepDuration={0.3} />
           <div className="report-sub">{report.sub}</div>
         </div>
