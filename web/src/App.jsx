@@ -15,6 +15,41 @@ applyStoredTheme();
 const POLL_ACTIVE_MS = 4000;
 const POLL_IDLE_MS = 30000;
 
+const MOBILE = "(max-width: 980px)";
+
+/** True while the media query matches; follows rotation and resizes. */
+function useMedia(query) {
+  const [match, setMatch] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const on = () => setMatch(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, [query]);
+  return match;
+}
+
+/** Phone navigation: one screen per tab instead of the stacked desktop rail. */
+function TabBar({ tab, onTab, running }) {
+  const items = [
+    { id: "scan", label: "Scan", icon: "play" },
+    { id: "runs", label: "Runs", icon: "clock", dot: running },
+    { id: "results", label: "Results", icon: "chart" },
+    { id: "watchlist", label: "Watchlist", icon: "list" },
+  ];
+  return (
+    <nav className="tabbar" aria-label="Sections">
+      {items.map(it => (
+        <button key={it.id} type="button" className={`tabbar-btn ${tab === it.id ? "on" : ""}`}
+          onClick={() => onTab(it.id)} aria-current={tab === it.id ? "page" : undefined}>
+          <span className="tabbar-icon"><Icon name={it.icon} size={19} />{it.dot && <i className="tabbar-dot" />}</span>
+          <span>{it.label}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 function storedRail() {
   try { return localStorage.getItem("sd-rail") !== "closed"; } catch { return true; }
 }
@@ -28,6 +63,12 @@ function Desk({ onSignedOut }) {
   const [view, setView] = useState("runs"); // runs | watchlist
   const [watchlist, setWatchlist] = useState(null); // { groups, total, names, custom }
   const [scanGroup, setScanGroup] = useState(""); // "" = every group
+  const mobile = useMedia(MOBILE);
+  const [tab, setTabState] = useState("results"); // phones: scan | runs | results | watchlist
+  const setTab = next => {
+    setTabState(next);
+    window.scrollTo({ top: 0 });
+  };
 
   const toggleRail = () => {
     setRailOpen(open => {
@@ -69,8 +110,8 @@ function Desk({ onSignedOut }) {
   const scanOnGroup = id => {
     setScanGroup(id);
     setView("runs");
-    if (!railOpen) toggleRail();
-    if (window.innerWidth <= 980) window.scrollTo({ top: 0, behavior: "smooth" });
+    if (mobile) setTab("scan");
+    else if (!railOpen) toggleRail();
   };
 
   const active = runs?.find(r => r.id === activeId) ?? null;
@@ -93,9 +134,7 @@ function Desk({ onSignedOut }) {
     setRuns(rs => [run, ...(rs ?? [])]);
     setActiveId(run.id);
     setView("runs");
-    if (window.innerWidth <= 980) {
-      setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
-    }
+    if (mobile) setTab("results");
   };
 
   const signOut = async () => {
@@ -107,10 +146,11 @@ function Desk({ onSignedOut }) {
   const selectRun = id => {
     setActiveId(id);
     setView("runs");
+    if (mobile) setTab("results");
   };
 
   let pane;
-  if (view === "watchlist") {
+  if (view === "watchlist" && !mobile) {
     pane = <Watchlist watchlist={watchlist} onChange={setWatchlist} onScanGroup={scanOnGroup} onSignedOut={onSignedOut} />;
   }
   else if (!runs) pane = <section className="panel notice"><p>Loading runs…</p></section>;
@@ -119,7 +159,8 @@ function Desk({ onSignedOut }) {
       <section className="panel notice">
         <h2>No runs yet</h2>
         <p>Pick a scan and press Run scan. Results show up here in a minute or two.</p>
-        {!railOpen && <p><button type="button" className="btn-primary" onClick={toggleRail}><Icon name="panelOpen" size={14} /> New scan</button></p>}
+        {mobile && <p><button type="button" className="btn-primary" onClick={() => setTab("scan")}><Icon name="play" size={13} /> New scan</button></p>}
+        {!mobile && !railOpen && <p><button type="button" className="btn-primary" onClick={toggleRail}><Icon name="panelOpen" size={14} /> New scan</button></p>}
       </section>
     );
   } else if (ACTIVE.has(active.status)) pane = <Progress run={active} parts={parts} />;
@@ -132,6 +173,34 @@ function Desk({ onSignedOut }) {
       </>
     );
   } else pane = <Report key={active.id} run={active} parts={parts} />;
+
+  const wizard = (
+    <Wizard onRun={startRun} runs={runs ?? []} groups={watchlist?.groups ?? []} total={watchlist?.total ?? 0}
+      group={scanGroup} onGroupChange={setScanGroup} />
+  );
+  const history = <History runs={runs ?? []} activeId={activeId} onSelect={selectRun} />;
+  const watchlistPage = <Watchlist watchlist={watchlist} onChange={setWatchlist} onScanGroup={scanOnGroup} onSignedOut={onSignedOut} />;
+
+  if (mobile) {
+    const screen = { scan: wizard, runs: history, watchlist: watchlistPage }[tab];
+    // The tab bar sits outside .shell: the shell's entrance animation leaves a
+    // transform on it, which would pin a fixed child to the shell, not the screen.
+    return (
+      <>
+      <div className="shell mobile">
+        <header className="topbar">
+          <div className="brand"><span className="brand-mark"><BrandMark /></span>Scanner Desk</div>
+          <div className="topbar-meta">
+            <ThemeToggle />
+            <button type="button" className="icon-btn" onClick={signOut} title="Sign out" aria-label="Sign out"><Icon name="logout" /></button>
+          </div>
+        </header>
+        <main className="results" key={tab}>{screen ?? pane}</main>
+      </div>
+      <TabBar tab={tab} onTab={setTab} running={anyActive} />
+      </>
+    );
+  }
 
   return (
     <div className="shell">

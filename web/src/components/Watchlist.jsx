@@ -65,7 +65,7 @@ function SymbolSearch({ groupName, inGroup, onAdd, busy, onSignedOut }) {
             onFocus={() => setOpen(true)}
             onBlur={() => setTimeout(() => setOpen(false), 150)}
             onKeyDown={onKeyDown}
-            placeholder={`Add to ${groupName}: search “apple”, or paste AAPL, MSFT`}
+            placeholder="Search a company or symbol"
             aria-label={`Add tickers to ${groupName}`}
             autoComplete="off" spellCheck={false}
             role="combobox" aria-expanded={open && results.length > 0} aria-controls="wl-suggest"
@@ -262,7 +262,10 @@ function TickerTable({ group, groups, names, onRemove, onMove }) {
               const also = (memberOf[t] ?? []).filter(n => n !== group.name);
               return (
                 <tr key={t}>
-                  <td className="mono wl-tsym">{t}</td>
+                  <td className="wl-tsym">
+                    <span className="mono">{t}</span>
+                    {names[t] && <span className="wl-tsub">{names[t]}</span>}
+                  </td>
                   <td className="wl-tname">{names[t] || <span className="wl-dim">-</span>}</td>
                   <td className="wl-col-also">{also.length ? also.map(n => <span key={n} className="wl-tag">{n}</span>) : <span className="wl-dim">-</span>}</td>
                   <td className="wl-tactions">

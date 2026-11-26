@@ -443,15 +443,17 @@ a.chip:hover { border-color: var(--line-strong); color: var(--fg); }
   text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint);
   padding: 9px 12px; background: var(--surface-2); border-bottom: 1px solid var(--line);
 }
-.wl-table td { padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.wl-table td { text-align: left; font-family: var(--font-ui);  padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .wl-table tbody tr:last-child td { border-bottom: 0; }
 .wl-table tbody tr { transition: background .12s; }
 .wl-table tbody tr:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
-.wl-tsym { font-weight: 500; white-space: nowrap; width: 1%; padding-right: 20px; }
+.wl-tsym { white-space: nowrap; width: 1%; padding-right: 20px; }
+.wl-tsym .mono { font-weight: 500; }
+.wl-tsub { display: none; }
 .wl-tname { color: var(--muted); max-width: 0; width: 60%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wl-dim { color: var(--faint); }
 .wl-tag { display: inline-block; font-size: 11px; padding: 1px 7px; margin: 1px 4px 1px 0; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
-.wl-tactions { white-space: nowrap; text-align: right; width: 1%; }
+.wl-table td.wl-tactions { white-space: nowrap; text-align: right; width: 1%; }
 .wl-move {
   height: 28px; padding: 0 8px; border: 1px solid transparent; border-radius: 7px; background: none;
   color: var(--faint); font: inherit; font-size: 12px; cursor: pointer; opacity: 0; transition: opacity .12s, border-color .12s, color .12s;
@@ -489,7 +491,35 @@ a.chip:hover { border-color: var(--line-strong); color: var(--fg); }
   .wl-opt .wl-name { grid-column: 1 / -1; grid-row: 2; }
   .wl-filter { width: 100%; }
   .wl-rename input { width: 100%; }
+  /* Phones: company name under the symbol, so the row keeps its actions. */
+  .wl-table th:nth-child(2), .wl-tname { display: none; }
+  .wl-tsym { width: auto; max-width: 0; white-space: normal; }
+  .wl-tsub { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  .wl-move { width: 92px; }
 }
+
+/* ============================== phone tab bar ============================= */
+.shell.mobile { padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+.shell.mobile .results { animation: tabIn .25s var(--ease) both; }
+@keyframes tabIn { from { opacity: 0; transform: translateY(4px); } }
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-top: 1px solid var(--line);
+}
+.tabbar-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 6px 4px;
+  border: 0; background: none; border-radius: 10px; cursor: pointer;
+  font-size: 11px; font-weight: 500; color: var(--faint); -webkit-tap-highlight-color: transparent;
+  transition: color .15s;
+}
+.tabbar-btn.on { color: var(--accent); }
+.tabbar-icon { position: relative; display: grid; place-items: center; width: 44px; height: 28px; border-radius: 999px; transition: background .2s; }
+.tabbar-btn.on .tabbar-icon { background: var(--accent-soft); }
+.tabbar-dot { position: absolute; top: 3px; right: 9px; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 0 2px var(--surface); animation: blink 1s ease-in-out infinite; }
 
 /* ================================ results ================================ */
 .results { display: flex; flex-direction: column; gap: 16px; min-width: 0; }

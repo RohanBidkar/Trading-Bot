@@ -27,6 +27,7 @@ const PATHS = {
   list: "M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01",
   plus: "M12 5v14M5 12h14",
   x: "M6 6l12 12M18 6L6 18",
+  chart: "M4 20V11M10 20V5M16 20v-6M2 20h20",
   trend: "M3 20h18M4 16l4.5-5 3.5 3 7-8M15 6h4v4",
   edit: "M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4",
   trash: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6",
