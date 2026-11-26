@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { buildReport } from "../lib/report.js";
+import { buildReport, byRsiBuckets } from "../lib/report.js";
 import { SCANS } from "../lib/scans.js";
 import BlurText from "./bits/BlurText.jsx";
 import CountUp from "./bits/CountUp.jsx";
@@ -43,6 +43,15 @@ export default function Report({ run, parts }) {
   const report = useMemo(() => buildReport(run, parts), [run, parts]);
   const [tab, setTab] = useState(null);
   const [query, setQuery] = useState("");
+  const [rsiBuckets, setRsiBuckets] = useState(() => {
+    try { return localStorage.getItem("sd-rsi-buckets") === "on"; } catch { return false; }
+  });
+  const toggleRsiBuckets = () => {
+    setRsiBuckets(on => {
+      try { localStorage.setItem("sd-rsi-buckets", on ? "off" : "on"); } catch { /* private window */ }
+      return !on;
+    });
+  };
   useEffect(() => { setTab(null); setQuery(""); }, [run.id]);
 
   if (!report) {
@@ -65,7 +74,8 @@ export default function Report({ run, parts }) {
     );
   }
 
-  const section = report.sections.find(s => s.id === tab) ?? report.sections[0];
+  const picked = report.sections.find(s => s.id === tab) ?? report.sections[0];
+  const section = picked.rsiBuckets && rsiBuckets ? byRsiBuckets(picked) : picked;
   const scan = SCANS[run.scan] ?? {};
 
   return (
@@ -92,10 +102,18 @@ export default function Report({ run, parts }) {
         ) : (
           <span className="eyebrow">{section.rows.length} rows</span>
         )}
+        <div className="toolbar-right">
+        {picked.rsiBuckets && (
+          <button type="button" className={`toggle ${rsiBuckets ? "on" : ""}`} onClick={toggleRsiBuckets} aria-pressed={rsiBuckets}
+            title="Sort by RSI, low to high, in 5-point groups">
+            <Icon name="rsi" size={14} /> RSI buckets
+          </button>
+        )}
         <label className="search">
           <Icon name="search" size={14} />
           <input id="ticker-search" type="search" placeholder="Filter tickers" value={query} onChange={e => setQuery(e.target.value)} aria-label="Filter tickers" />
         </label>
+        </div>
       </div>
 
       {section.note && <div className="section-note">{section.note}</div>}

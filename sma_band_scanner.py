@@ -43,6 +43,7 @@ from scanner_core import (
     publish_result,
     send_telegram,
     sort_by_tier,
+    stk_width,
 )
 
 # ---------------- CONFIG ----------------
@@ -79,8 +80,9 @@ def price(value: float, width: int) -> str:
 
 def format_table(rows: list, band: float, label: str = "STK") -> str:
     """Fixed-width table so the columns line up in a monospace block."""
+    w = stk_width(rows, label)
     header = (
-        f"{label:<6}"
+        f"{label:<{w}}"
         + "".join(f"{f'D{n}':>7}" for n in MOVE_DAYS)
         + f"{'DIFF':>7}{f'RSI{RSI_LEN}':>7}{f'SMA{SMA_LEN}':>8}{'CLOSE':>8}"
         f"{f'-{band:.1f}%':>9}{f'+{band:.1f}%':>9}"
@@ -88,7 +90,7 @@ def format_table(rows: list, band: float, label: str = "STK") -> str:
     lines = [header, "-" * len(header)]
     for m in rows:
         lines.append(
-            f"{m['ticker']:<6}"
+            f"{m['ticker']:<{w}}"
             + "".join(f"{m[f'd{n}']:>6.1f}%" for n in MOVE_DAYS)
             + f"{m['diff']:>6.1f}%"
             f"{m['rsi']:>7.1f}"

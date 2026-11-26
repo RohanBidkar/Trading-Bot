@@ -1,10 +1,9 @@
 # Stock Scanner → Telegram
 
-Two automated daily scanners for US regional-bank stocks (plus a few ETFs).
-After the US close they check every ticker and send Telegram alerts: an
-**oversold** (long-side) scan and an **overbought** (short-side) scan. Both run
-automatically on a schedule, and either can be triggered on demand from a
-Telegram button.
+Two scanners for US regional-bank stocks (plus a few ETFs) that check every
+ticker on the latest daily bar: an **oversold** (long-side) scan and an
+**overbought** (short-side) scan. They run on demand only - from a Telegram
+button, the Scanner Desk website, or the Actions tab. There is no schedule.
 
 Three more on-demand reports cover the whole list rather than screening it: two
 rank every ticker by its return — over the **first five trading days of a
@@ -65,8 +64,17 @@ cutoff is exclusive — exactly $100.00 falls in the lower (3%) tier.
 
 Thresholds live at the top of each scanner (`PCT_DROP_*` / `RSI_OVERSOLD` /
 `DROP_THRESHOLD`, and `PCT_RISE_*` / `RSI_OVERBOUGHT` / `RISE_THRESHOLD`).
-Shared settings — `TICKERS`, `SMA_LEN`, `RSI_LEN`, `PRICE_TIER`,
+Shared settings — `SMA_LEN`, `RSI_LEN`, `PRICE_TIER`,
 `MOVE_LOOKBACK` — live in `scanner_core.py`.
+
+**The watchlist is edited on the website** (the Watchlist button in the top
+bar). Add any Yahoo Finance symbol, such as `AAPL`, `BRK-B`, `RELIANCE.NS` or
+`^GSPC`. Each one is checked against Yahoo before it is saved, and you can add
+up to 200 tickers. The list lives in D1, and every scan fetches it at startup
+from `/api/results/watchlist`. If that fetch fails, or on a local run without
+`RESULTS_URL`, the scan falls back to `DEFAULT_TICKERS` in `scanner_core.py`.
+That list is also what "Reset to built-in" restores, so keep it in step with
+`DEFAULT_TICKERS` in `web_api.js`.
 
 Note the two sides are not symmetric in practice. On this list the binding
 constraint for the short side is the **distance** requirement, not RSI: these
@@ -203,8 +211,7 @@ No matches — 44 tickers scanned.
 
 Silence is indistinguishable from a broken run, so an empty scan says so
 explicitly. Set `NOTIFY_WHEN_EMPTY=0` in the environment to go back to
-alert-only delivery — useful on the scheduled run if two "no matches" messages
-a day become noise, while on-demand scans keep confirming they worked. A run
+alert-only delivery, if "no matches" messages become noise. A run
 that cannot fetch any data at all sends a distinct ⚠️ warning instead.
 
 Data source is yfinance, ~6 months of daily bars per ticker (enough history to
@@ -317,16 +324,12 @@ of what you would want.
 
 ## Deploy the GitHub Actions workflow
 
-`.github/workflows/daily_scan.yml` runs at **21:30 UTC, Mon–Fri** — 4:30pm ET
-during daylight saving, 5:30pm ET in winter (GitHub cron is always UTC, and
-both are after the 4:00pm ET close). Scheduled runs execute **both** scanners,
-which send two separate Telegram messages.
-
-It also supports **workflow_dispatch** with a `scan` input — `both` (default),
-`oversold`, `overbought`, `first5`, `last5`, or `bands` — so you can run one
-side by hand from the Actions tab, or from the Telegram menu via the Worker.
-`both` still means the oversold/overbought pair; `first5`, `last5` and `bands`
-are on demand only and never run on the schedule. Two text inputs go with it:
+`.github/workflows/daily_scan.yml` has **no schedule**: it runs only through
+**workflow_dispatch**, from the website, the Telegram menu (both via the
+Worker) or by hand from the Actions tab. The `scan` input picks what runs —
+`both` (default, the oversold/overbought pair, sent as two Telegram messages),
+`oversold`, `overbought`, `first5`, `last5`, `bands` or `fxbands`. Two text
+inputs go with it:
 `as_of` (a session, used by everything except `first5`) and `month` (a
 `YYYY-MM`, for `first5`); both blank means "the latest".
 
@@ -337,9 +340,6 @@ After pushing the repo:
 3. Add `TELEGRAM_CHAT_ID`
 4. Open the **Actions** tab, pick *Daily Oversold Scan*, and hit **Run workflow**
    to confirm it works end to end
-
-Note: GitHub disables scheduled workflows in repos with no activity for 60
-days, and scheduled runs can be delayed by several minutes at busy times.
 
 ## Deploy the Cloudflare Worker (separate deploy)
 
@@ -484,14 +484,15 @@ It is served by the **same Worker** as the Telegram bot: `GET /` is the site,
   signed, HttpOnly cookie for 30 days; 8 wrong tries from one IP lock it for
   15 minutes. Changing the password signs everyone out.
 - **Results stay on the website.** Runs started there pass `telegram: no`, so
-  the scripts skip Telegram (`SEND_TELEGRAM=0`). Scheduled and Telegram runs
-  still post to Telegram as before, **and** show up in the website's history.
+  the scripts skip Telegram (`SEND_TELEGRAM=0`). Telegram runs still post to
+  Telegram as before, **and** show up in the website's history.
 - **Numbers, not text.** Each script posts its rows as JSON next to the
   Telegram message (`publish_result` in `scanner_core.py`), filed under a run
   id the Worker created. `report_status.py` marks the run running / done /
-  failed. Scheduled runs get an id of their own (`gh-<run number>`).
-- **Storage** is a D1 database, created by wrangler on the first deploy. The
-  Worker creates its tables on first use, so there is no migration step.
+  failed. Runs started from the Actions tab get an id of their own
+  (`gh-<run number>`).
+- **Storage** is the `alert-bot` D1 database (its id is in `wrangler.jsonc`).
+  The Worker creates its tables on first use, so there is no migration step.
 
 The UI is React (Vite) with components from [React Bits](https://reactbits.dev)
 in `web/src/components/bits/`: SpotlightCard, CountUp, BlurText, ShinyText,
@@ -505,7 +506,7 @@ npx wrangler secret put WEB_PASSWORD
 openssl rand -hex 32                          # use this as RESULTS_SECRET below
 npx wrangler secret put RESULTS_SECRET
 
-# 2. Build the site and deploy (also creates the D1 database)
+# 2. Build the site and deploy
 npm install && npm install --prefix web
 npm run deploy
 ```
@@ -548,7 +549,7 @@ last_five_scanner.py             # trailing 5-session performance ranking
 sma_band_scanner.py              # SMA20 +/-2.8% levels for every ticker
 first_five_scanner.py            # month-open performance ranking (on demand)
 requirements.txt                 # pinned yfinance / pandas / requests
-.github/workflows/daily_scan.yml # daily cron + manual trigger with scan input
+.github/workflows/daily_scan.yml # on-demand workflow (no schedule) with scan input
 telegram_trigger_worker.js       # Cloudflare Worker: Telegram menu -> dispatch, routes the site
 web_api.js                       # Worker: website login, runs and results API (D1)
 web/                             # Scanner Desk website (React + Vite + React Bits)

@@ -12,7 +12,7 @@ export default function History({ runs, activeId, onSelect }) {
         <span className="chip">{runs.length}</span>
       </div>
       {runs.length === 0 ? (
-        <p className="empty">Nothing yet. Runs from the website, Telegram and the 4:30pm daily scan all show up here.</p>
+        <p className="empty">Nothing yet. Runs from the website and from Telegram both show up here.</p>
       ) : (
         <ul className="hist-list">
           {runs.map(r => {

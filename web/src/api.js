@@ -28,4 +28,9 @@ export const api = {
   runs: () => call("/api/runs"),
   run: id => call(`/api/runs/${encodeURIComponent(id)}`),
   start: ({ scan, asOf, month }) => call("/api/runs", { method: "POST", body: { scan, as_of: asOf, month } }),
+  searchSymbols: q => call(`/api/symbols?q=${encodeURIComponent(q)}`),
+  watchlist: () => call("/api/watchlist"),
+  addTickers: tickers => call("/api/watchlist", { method: "POST", body: { add: tickers } }),
+  removeTicker: ticker => call(`/api/watchlist/${encodeURIComponent(ticker)}`, { method: "DELETE" }),
+  resetWatchlist: () => call("/api/watchlist/reset", { method: "POST", body: {} }),
 };

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AuthError, api } from "./api.js";
-import { nextScheduled, pad } from "./lib/dates.js";
 import { ACTIVE, FAILED } from "./lib/scans.js";
 import History from "./components/History.jsx";
 import Icon, { BrandMark } from "./components/Icon.jsx";
@@ -8,6 +7,7 @@ import Login from "./components/Login.jsx";
 import Progress, { Failed } from "./components/Progress.jsx";
 import Report from "./components/Report.jsx";
 import ThemeToggle, { applyStoredTheme } from "./components/ThemeToggle.jsx";
+import Watchlist from "./components/Watchlist.jsx";
 import Wizard from "./components/Wizard.jsx";
 
 applyStoredTheme();
@@ -15,20 +15,8 @@ applyStoredTheme();
 const POLL_ACTIVE_MS = 4000;
 const POLL_IDLE_MS = 30000;
 
-function Countdown() {
-  const [, tick] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => tick(x => x + 1), 30000);
-    return () => clearInterval(t);
-  }, []);
-  const ms = nextScheduled() - Date.now();
-  const h = Math.floor(ms / 3600000);
-  const m = Math.floor(ms / 60000) % 60;
-  return (
-    <span className="chip hide-sm" title="The daily scan runs at 21:30 UTC, Monday to Friday">
-      <i className="live-dot" />Daily scan in <strong className="num">{h}h {pad(m)}m</strong>
-    </span>
-  );
+function storedRail() {
+  try { return localStorage.getItem("sd-rail") !== "closed"; } catch { return true; }
 }
 
 function Desk({ onSignedOut }) {
@@ -36,6 +24,15 @@ function Desk({ onSignedOut }) {
   const [activeId, setActiveId] = useState(null);
   const [details, setDetails] = useState({}); // id -> { parts, version }
   const resultsRef = useRef(null);
+  const [railOpen, setRailOpen] = useState(storedRail);
+  const [view, setView] = useState("runs"); // runs | watchlist
+
+  const toggleRail = () => {
+    setRailOpen(open => {
+      try { localStorage.setItem("sd-rail", open ? "closed" : "open"); } catch { /* private window */ }
+      return !open;
+    });
+  };
 
   const guard = useCallback(err => {
     if (err instanceof AuthError) onSignedOut();
@@ -81,6 +78,7 @@ function Desk({ onSignedOut }) {
     const { run } = await api.start(params).catch(err => { guard(err); throw err; });
     setRuns(rs => [run, ...(rs ?? [])]);
     setActiveId(run.id);
+    setView("runs");
     if (window.innerWidth <= 980) {
       setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
     }
@@ -92,13 +90,20 @@ function Desk({ onSignedOut }) {
   };
 
   const parts = active ? details[active.id]?.parts : null;
+  const selectRun = id => {
+    setActiveId(id);
+    setView("runs");
+  };
+
   let pane;
-  if (!runs) pane = <section className="panel notice"><p>Loading runs…</p></section>;
+  if (view === "watchlist") pane = <Watchlist onSignedOut={onSignedOut} />;
+  else if (!runs) pane = <section className="panel notice"><p>Loading runs…</p></section>;
   else if (!active) {
     pane = (
       <section className="panel notice">
         <h2>No runs yet</h2>
-        <p>Pick a scan on the left and press Run scan. Results show up here in a minute or two.</p>
+        <p>Pick a scan and press Run scan. Results show up here in a minute or two.</p>
+        {!railOpen && <p><button type="button" className="btn-primary" onClick={toggleRail}><Icon name="panelOpen" size={14} /> New scan</button></p>}
       </section>
     );
   } else if (ACTIVE.has(active.status)) pane = <Progress run={active} parts={parts} />;
@@ -116,16 +121,26 @@ function Desk({ onSignedOut }) {
     <div className="shell">
       <header className="topbar">
         <div className="brand"><span className="brand-mark"><BrandMark /></span>Scanner Desk</div>
+        <button type="button" className="icon-btn rail-toggle" onClick={toggleRail}
+          aria-expanded={railOpen} aria-controls="rail"
+          title={railOpen ? "Hide scans and runs" : "Show scans and runs"}
+          aria-label={railOpen ? "Hide scans and runs" : "Show scans and runs"}>
+          <Icon name={railOpen ? "panelClose" : "panelOpen"} />
+        </button>
         <div className="topbar-meta">
-          <Countdown />
+          <button type="button" className={`chip-btn ${view === "watchlist" ? "active" : ""}`}
+            onClick={() => setView(v => (v === "watchlist" ? "runs" : "watchlist"))}
+            aria-pressed={view === "watchlist"} title="Edit the tickers every scan runs on">
+            <Icon name="list" size={14} /> Watchlist
+          </button>
           <ThemeToggle />
           <button type="button" className="icon-btn" onClick={signOut} title="Sign out" aria-label="Sign out"><Icon name="logout" /></button>
         </div>
       </header>
-      <div className="layout">
-        <aside className="rail">
+      <div className={`layout ${railOpen ? "" : "rail-closed"}`}>
+        <aside className="rail" id="rail" inert={railOpen ? undefined : ""} aria-hidden={!railOpen}>
           <Wizard onRun={startRun} runs={runs ?? []} />
-          <History runs={runs ?? []} activeId={activeId} onSelect={setActiveId} />
+          <History runs={runs ?? []} activeId={activeId} onSelect={selectRun} />
         </aside>
         <main className="results" ref={resultsRef}>{pane}</main>
       </div>

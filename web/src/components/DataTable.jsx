@@ -101,8 +101,9 @@ export default function DataTable({ section, query, animKey }) {
               </td>
             </tr>
           )}
-          {groups.map(({ g, rows: groupRows }) => (
-            <GroupRows key={g ?? "all"} label={g} rows={groupRows} columns={section.columns} next={() => index++} />
+          {groups.map(({ g, rows: groupRows }, i) => (
+            <GroupRows key={g ?? "all"} label={g} rows={groupRows} columns={section.columns} next={() => index++}
+              gap={section.gapped && i > 0} />
           ))}
         </tbody>
       </table>
@@ -110,9 +111,10 @@ export default function DataTable({ section, query, animKey }) {
   );
 }
 
-function GroupRows({ label, rows, columns, next }) {
+function GroupRows({ label, rows, columns, next, gap }) {
   return (
     <>
+      {gap && <tr className="group-gap" aria-hidden="true"><td colSpan={columns.length} /></tr>}
       {label && <tr className="group"><td colSpan={columns.length}>{label} · {rows.length}</td></tr>}
       {rows.map(r => (
         <tr key={r.ticker} className="row" style={{ animationDelay: `${Math.min(next(), 24) * 22}ms` }}>

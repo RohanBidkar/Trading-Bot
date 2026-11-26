@@ -23,7 +23,10 @@ import requests
 import yfinance as yf
 
 # ---------------- SHARED CONFIG ----------------
-TICKERS = [
+# The built-in watchlist. The live list is edited on the website and fetched
+# by load_tickers() below; this is what runs when the site can't be reached
+# (or a local run with no RESULTS_URL). Keep in step with web_api.js.
+DEFAULT_TICKERS = [
     "SFST", "HBCP", "UNTY", "OBT", "PFIS", "MCBS", "CAC", "CCBG", "JBSS", "SPFI",
     "CBNK", "RBCAA", "SMBC", "THFF", "FCBC", "HWBK", "FBIZ", "CHMG", "MBWM", "GSBC",
     "PKBK", "PLBC", "FRAF", "CCB", "FCAP", "CMTV",
@@ -32,7 +35,7 @@ TICKERS = [
 ]
 
 # Send a "no matches" message too, so a scan never ends in silence. Set to
-# 0/false to go back to alert-only delivery (useful for the daily cron).
+# 0/false to go back to alert-only delivery.
 NOTIFY_WHEN_EMPTY = os.environ.get("NOTIFY_WHEN_EMPTY", "1").strip().lower() not in (
     "0", "false", "no", "off", "",
 )
@@ -42,7 +45,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "YOUR_BOT_TOKEN_HERE")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "YOUR_CHAT_ID_HERE")
 
 # Runs dispatched from the website pass SEND_TELEGRAM=0: their results stay on
-# the website. Scheduled and Telegram-started runs leave it on.
+# the website. Telegram-started runs leave it on.
 SEND_TELEGRAM = os.environ.get("SEND_TELEGRAM", "1").strip().lower() not in (
     "0", "false", "no", "off",
 )
@@ -52,6 +55,33 @@ SEND_TELEGRAM = os.environ.get("SEND_TELEGRAM", "1").strip().lower() not in (
 RESULTS_URL = os.environ.get("RESULTS_URL", "").strip().rstrip("/")
 RESULTS_SECRET = os.environ.get("RESULTS_SECRET", "").strip()
 RUN_ID = os.environ.get("RUN_ID", "").strip()
+
+
+def load_tickers() -> list:
+    """The website's watchlist, or DEFAULT_TICKERS if it can't be fetched.
+
+    A failed fetch never stops a scan - it just runs on the built-in list.
+    """
+    if not (RESULTS_URL and RESULTS_SECRET):
+        return list(DEFAULT_TICKERS)
+    try:
+        resp = requests.get(
+            f"{RESULTS_URL}/api/results/watchlist",
+            headers={"Authorization": f"Bearer {RESULTS_SECRET}"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        tickers = [str(t).strip().upper() for t in resp.json().get("tickers", []) if str(t).strip()]
+        if tickers:
+            print(f"Watchlist: {len(tickers)} tickers from the website")
+            return tickers
+        print("Website returned an empty watchlist; using the built-in list")
+    except Exception as exc:
+        print(f"Could not fetch the watchlist ({exc}); using the built-in list")
+    return list(DEFAULT_TICKERS)
+
+
+TICKERS = load_tickers()
 
 SMA_LEN = 20
 RSI_LEN = 14
@@ -184,19 +214,25 @@ def plain(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text)
 
 
+def stk_width(rows: list, label: str = "STK") -> int:
+    """Ticker column width: 6 as before, wider for symbols like RELIANCE.NS."""
+    return max(6, len(label) + 1, *(len(m["ticker"]) + 1 for m in rows))
+
+
 def format_table(rows: list, setup: Setup) -> str:
     """Fixed-width table so the columns line up in a monospace block."""
     # The sharp-move setups already show `move` as their metric column, so only
     # add the D10 column when it would not repeat what is already there.
     show_move = setup.key != "move"
+    w = stk_width(rows)
 
-    header = f"{'STK':<6}{'CLOSE':>9}{setup.column:>8}{'SMA20':>9}{'RSI':>7}"
+    header = f"{'STK':<{w}}{'CLOSE':>9}{setup.column:>8}{'SMA20':>9}{'RSI':>7}"
     if show_move:
         header += f"{'D10':>8}"
     lines = [header, "-" * len(header)]
     for m in rows:
         line = (
-            f"{m['ticker']:<6}"
+            f"{m['ticker']:<{w}}"
             f"{m['close']:>9.2f}"
             f"{m[setup.key]:>7.1f}%"
             f"{m['sma']:>9.2f}"
@@ -213,11 +249,12 @@ def format_return_table(rows: list) -> str:
 
     Rows need `ticker`, `base` (the close measured from), `last` and `ret`.
     """
-    header = f"{'STK':<6}{'PREV':>9}{'LAST':>9}{'RET':>8}"
+    w = stk_width(rows)
+    header = f"{'STK':<{w}}{'PREV':>9}{'LAST':>9}{'RET':>8}"
     lines = [header, "-" * len(header)]
     for m in rows:
         lines.append(
-            f"{m['ticker']:<6}"
+            f"{m['ticker']:<{w}}"
             f"{m['base']:>9.2f}"
             f"{m['last']:>9.2f}"
             f"{m['ret']:>7.1f}%"

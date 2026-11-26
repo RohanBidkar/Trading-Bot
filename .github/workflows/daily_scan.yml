@@ -1,12 +1,10 @@
 name: Daily Stock Scan
 # Shows which scan each run was in the Actions list.
-run-name: ${{ github.event_name == 'schedule' && 'Daily scan' || format('{0} {1}{2}', inputs.scan, inputs.as_of, inputs.month) }}
+run-name: ${{ format('{0} {1}{2}', inputs.scan, inputs.as_of, inputs.month) }}
 
+# On demand only - from the website, the Telegram menu or the Actions tab.
+# There is no schedule.
 on:
-  schedule:
-    # 21:30 UTC, Mon-Fri = 16:30 ET (EDT) / 17:30 ET in winter. GitHub cron is
-    # always UTC, so both land after the 4:00pm ET close.
-    - cron: "30 21 * * 1-5"
   workflow_dispatch:
     inputs:
       scan:
@@ -45,11 +43,10 @@ on:
           - "no"
 
 env:
-  # Scheduled runs have no inputs, so default them to "both" / latest bar.
   SCAN: ${{ github.event.inputs.scan || 'both' }}
   AS_OF: ${{ github.event.inputs.as_of || '' }}
   MONTH: ${{ github.event.inputs.month || '' }}
-  # Scheduled and hand-started runs get an id of their own on the website.
+  # Runs started from the Actions tab get an id of their own on the website.
   RUN_ID: ${{ github.event.inputs.run_id || format('gh-{0}', github.run_id) }}
   SEND_TELEGRAM: ${{ github.event.inputs.telegram == 'no' && '0' || '1' }}
 

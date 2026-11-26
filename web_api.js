@@ -8,10 +8,16 @@
  *   GET  /api/runs            recent runs, newest first
  *   POST /api/runs            start a scan; results stay on the website
  *   GET  /api/runs/:id        one run with the numbers its scanners sent
+ *   GET  /api/watchlist       the tickers the scanners run on
+ *   POST /api/watchlist       { add: [...] } - checked against Yahoo, then appended
+ *   DELETE /api/watchlist/:t  drop one ticker
+ *   POST /api/watchlist/reset back to the built-in list
+ *   GET  /api/symbols?q=apple Yahoo Finance symbol search, for the add box
  *
  * Runner routes (GitHub Actions, Bearer RESULTS_SECRET):
  *   POST /api/results/status  the workflow started or finished
  *   POST /api/results         one scanner's numbers (see publish_result in scanner_core.py)
+ *   GET  /api/results/watchlist  the tickers to scan (see load_tickers in scanner_core.py)
  *
  * Storage is D1 (binding DB). The tables are created on first use, so there is
  * no migration step.
@@ -39,6 +45,23 @@ const MAX_RESULT_BYTES = 256 * 1024;
 const PARTS = new Set(["oversold", "overbought", "bands", "fxbands", "first5", "last5"]);
 const RUNNER_STATUSES = new Set(["running", "success", "failure", "cancelled"]);
 const RUN_ID = /^[A-Za-z0-9_-]{1,48}$/;
+
+// The built-in watchlist, used until someone edits it on the website. Keep in
+// step with DEFAULT_TICKERS in scanner_core.py (the fallback when the site is
+// unreachable).
+const DEFAULT_TICKERS = [
+  "SFST", "HBCP", "UNTY", "OBT", "PFIS", "MCBS", "CAC", "CCBG", "JBSS", "SPFI",
+  "CBNK", "RBCAA", "SMBC", "THFF", "FCBC", "HWBK", "FBIZ", "CHMG", "MBWM", "GSBC",
+  "PKBK", "PLBC", "FRAF", "CCB", "FCAP", "CMTV",
+  "BFC", "BANF", "NBN", "BOKF", "BPOP", "CHCO", "ESQ", "EWBC", "FCNCA", "HIFS",
+  "PFBC", "QCRH", "RRBI", "UMBF", "WTFC", "DPST", "KRE", "HOV",
+];
+// Yahoo Finance symbols: AAPL, BRK-B, RELIANCE.NS, ^GSPC, EURUSD=X, BTC-USD.
+const SYMBOL = /^[A-Z0-9^][A-Z0-9.\-=^]{0,19}$/;
+// Every ticker is a separate download per scanner; this keeps a run well
+// inside the workflow's 20-minute timeout.
+const MAX_TICKERS = 200;
+const MAX_ADD = 25;
 
 const encoder = new TextEncoder();
 
@@ -104,6 +127,11 @@ function ensureSchema(env) {
       data TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       PRIMARY KEY (run_id, part)
+    )`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
     )`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS login_failures (
       ip TEXT PRIMARY KEY,
@@ -272,9 +300,9 @@ async function runnerStatus(request, env) {
   if (!body || !RUN_ID.test(body.run_id ?? "") || !RUNNER_STATUSES.has(body.status)) {
     return json({ error: "Expected run_id and a status." }, 400);
   }
-  // A scheduled or hand-started run has no row yet; the first report creates it.
+  // A run started from the Actions tab has no row yet; the first report creates it.
   const scan = LABELS[body.scan] ? body.scan : "both";
-  const source = body.event === "schedule" ? "Schedule" : "GitHub";
+  const source = "GitHub";
   const ghUrl = typeof body.gh_url === "string" && body.gh_url.startsWith("https://github.com/") ? body.gh_url : null;
   const now = Date.now();
   await env.DB.prepare(
@@ -298,6 +326,117 @@ async function runnerResult(request, env) {
   return json({ ok: true });
 }
 
+/* -------------------------------- watchlist ------------------------------- */
+
+/** { tickers, custom } - custom is false until the list is first edited. */
+async function readWatchlist(env) {
+  const row = await env.DB.prepare("SELECT value FROM settings WHERE key = 'watchlist'").first();
+  if (row) {
+    try {
+      const tickers = JSON.parse(row.value);
+      if (Array.isArray(tickers) && tickers.length) return { tickers, custom: true };
+    } catch { /* fall through to the built-in list */ }
+  }
+  return { tickers: [...DEFAULT_TICKERS], custom: false };
+}
+
+async function saveWatchlist(env, tickers) {
+  await env.DB.prepare(
+    `INSERT INTO settings (key, value, updated_at) VALUES ('watchlist', ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+  ).bind(JSON.stringify(tickers), Date.now()).run();
+  return { tickers, custom: true };
+}
+
+/**
+ * Ask Yahoo whether a symbol exists - the same chart API yfinance reads.
+ * "missing" only on a definite not-found; anything else (rate limit, Yahoo
+ * refusing Cloudflare) is "unchecked" and the ticker is still added.
+ */
+async function lookupSymbol(symbol) {
+  try {
+    const resp = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=5d&interval=1d`,
+      { headers: { "User-Agent": "Mozilla/5.0 (compatible; ScannerDesk/1.0)", Accept: "application/json" } },
+    );
+    const data = await resp.json().catch(() => null);
+    const meta = data?.chart?.result?.[0]?.meta;
+    if (resp.ok && meta) {
+      return { status: "ok", name: meta.longName || meta.shortName || "", exchange: meta.fullExchangeName || meta.exchangeName || "" };
+    }
+    if (resp.status === 404 || data?.chart?.error?.code === "Not Found") return { status: "missing" };
+    return { status: "unchecked" };
+  } catch {
+    return { status: "unchecked" };
+  }
+}
+
+/** Yahoo's symbol search, proxied because the browser can't call Yahoo (CORS). */
+async function searchSymbols(url) {
+  const q = (url.searchParams.get("q") ?? "").trim().slice(0, 40);
+  if (q.length < 1) return json({ results: [] });
+  try {
+    const resp = await fetch(
+      `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=8&newsCount=0&listsCount=0`,
+      { headers: { "User-Agent": "Mozilla/5.0 (compatible; ScannerDesk/1.0)", Accept: "application/json" } },
+    );
+    if (!resp.ok) return json({ results: [], error: `Yahoo search failed (${resp.status}).` });
+    const data = await resp.json();
+    const results = (data.quotes ?? [])
+      .filter(r => r.symbol && SYMBOL.test(String(r.symbol).toUpperCase()))
+      .map(r => ({
+        symbol: String(r.symbol).toUpperCase(),
+        name: r.longname || r.shortname || "",
+        exchange: r.exchDisp || r.exchange || "",
+        type: r.typeDisp || r.quoteType || "",
+      }));
+    return json({ results });
+  } catch {
+    return json({ results: [], error: "Couldn't reach Yahoo search." });
+  }
+}
+
+async function addTickers(request, env) {
+  const body = await readJson(request);
+  const raw = Array.isArray(body?.add) ? body.add : typeof body?.add === "string" ? body.add.split(/[\s,;]+/) : null;
+  if (!raw) return json({ error: "Send the tickers to add as { add: [...] }." }, 400);
+
+  const wanted = [...new Set(raw.map(t => String(t).trim().toUpperCase()).filter(Boolean))];
+  if (wanted.length === 0) return json({ error: "Type at least one ticker." }, 400);
+  if (wanted.length > MAX_ADD) return json({ error: `Add at most ${MAX_ADD} tickers at a time.` }, 400);
+
+  const list = await readWatchlist(env);
+  const have = new Set(list.tickers);
+  const rejected = [];
+  const fresh = [];
+  for (const t of wanted) {
+    if (!SYMBOL.test(t)) rejected.push({ ticker: t, reason: "not a valid symbol" });
+    else if (have.has(t)) rejected.push({ ticker: t, reason: "already on the list" });
+    else fresh.push(t);
+  }
+
+  const checks = await Promise.all(fresh.map(lookupSymbol));
+  const added = [];
+  fresh.forEach((t, i) => {
+    if (checks[i].status === "missing") rejected.push({ ticker: t, reason: "Yahoo Finance has no such symbol" });
+    else added.push({ ticker: t, ...checks[i] });
+  });
+
+  if (list.tickers.length + added.length > MAX_TICKERS) {
+    return json({ error: `The watchlist holds at most ${MAX_TICKERS} tickers; it has ${list.tickers.length}.` }, 400);
+  }
+  const saved = added.length ? await saveWatchlist(env, [...list.tickers, ...added.map(a => a.ticker)]) : list;
+  return json({ ...saved, added, rejected });
+}
+
+async function removeTicker(env, ticker) {
+  const list = await readWatchlist(env);
+  const t = ticker.toUpperCase();
+  if (!list.tickers.includes(t)) return json({ error: `${t} is not on the list.` }, 404);
+  if (list.tickers.length === 1) return json({ error: "The watchlist needs at least one ticker." }, 400);
+  return json(await saveWatchlist(env, list.tickers.filter(x => x !== t)));
+}
+
 /* --------------------------------- router --------------------------------- */
 
 export async function handleApi(request, env, url) {
@@ -308,8 +447,9 @@ export async function handleApi(request, env, url) {
   const method = request.method;
 
   if (path.startsWith("/api/results")) {
-    if (method !== "POST") return json({ error: "Method not allowed" }, 405);
     if (!(await runnerAuthorized(request, env))) return json({ error: "Forbidden" }, 403);
+    if (path === "/api/results/watchlist" && method === "GET") return json(await readWatchlist(env));
+    if (method !== "POST") return json({ error: "Method not allowed" }, 405);
     if (path === "/api/results/status") return runnerStatus(request, env);
     if (path === "/api/results") return runnerResult(request, env);
     return json({ error: "Not found" }, 404);
@@ -331,6 +471,16 @@ export async function handleApi(request, env, url) {
   if (path === "/api/runs" && method === "POST") return startRun(request, env);
   const match = path.match(/^\/api\/runs\/([^/]+)$/);
   if (match && method === "GET") return getRun(env, decodeURIComponent(match[1]));
+
+  if (path === "/api/symbols" && method === "GET") return searchSymbols(url);
+  if (path === "/api/watchlist" && method === "GET") return json(await readWatchlist(env));
+  if (path === "/api/watchlist" && method === "POST") return addTickers(request, env);
+  if (path === "/api/watchlist/reset" && method === "POST") {
+    await env.DB.prepare("DELETE FROM settings WHERE key = 'watchlist'").run();
+    return json(await readWatchlist(env));
+  }
+  const item = path.match(/^\/api\/watchlist\/([^/]+)$/);
+  if (item && method === "DELETE") return removeTicker(env, decodeURIComponent(item[1]));
 
   return json({ error: "Not found" }, 404);
 }
