@@ -62,7 +62,13 @@ export default function DataTable({ section, query, animKey }) {
 
   const q = query.trim().toLowerCase();
   let rows = section.rows.filter(r => r.ticker.toLowerCase().includes(q));
-  if (sort) rows = [...rows].sort((a, b) => ((a[sort.key] ?? 0) - (b[sort.key] ?? 0)) * sort.dir);
+  if (sort) {
+    rows = [...rows].sort((a, b) => {
+      const x = a[sort.key], y = b[sort.key];
+      if (x == null || y == null) return (x == null) - (y == null); // blanks last
+      return (x - y) * sort.dir;
+    });
+  }
 
   // Sorting flattens the tier groups; the scanner's own order keeps them.
   const groups = section.group && !sort

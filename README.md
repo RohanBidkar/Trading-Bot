@@ -16,6 +16,7 @@ ticker's **SMA20 and the prices 2.8% either side of it**.
 | `oversold_scanner.py` | GitHub Actions | Long-side screen |
 | `overbought_scanner.py` | GitHub Actions | Short-side screen |
 | `sma_band_scanner.py` | GitHub Actions | SMA20 ±2.8% price levels for every ticker (on demand) |
+| `year_move_scanner.py` | GitHub Actions | Year movement: % change over D1, D5, D15, D22, D30, D50, D100, D200, D300, D400 for every ticker (on demand) |
 | `last_five_scanner.py` | GitHub Actions | Trailing 5-session performance ranking (on demand) |
 | `first_five_scanner.py` | GitHub Actions | Month-open performance ranking (on demand) |
 | `telegram_trigger_worker.js` | Cloudflare Workers | Telegram menu to run any of them on demand |
@@ -366,6 +367,7 @@ Telegram commands:
 | `/short` or `/overbought` | Overbought scan on the latest bar |
 | `/both` | Both |
 | `/bands` or `/sma` | SMA20 ±2.8% levels for every ticker |
+| `/moves` or `/year` | Year movement, D1 to D400, for every ticker |
 | `/last` or `/last5` | Ranking over the last 5 trading days |
 | `/scan 2026-09-01` | Oversold scan **as of that session** |
 | `/short 2026-09-01` | Overbought scan as of that session |

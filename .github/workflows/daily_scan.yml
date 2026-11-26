@@ -17,6 +17,7 @@ on:
           - overbought
           - first5
           - last5
+          - moves
           - bands
           - fxbands
       as_of:
@@ -127,6 +128,21 @@ jobs:
             python last_five_scanner.py --as-of "$AS_OF" --send
           else
             python last_five_scanner.py
+          fi
+
+      - name: Run year movement (D1 to D400)
+        # Only on request - it lists every ticker, so it is not part of "both".
+        if: env.SCAN == 'moves'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        # AS_OF is passed through the environment and quoted, never
+        # interpolated into the shell line, so a hostile input cannot escape.
+        run: |
+          if [ -n "$AS_OF" ]; then
+            python year_move_scanner.py --as-of "$AS_OF" --send
+          else
+            python year_move_scanner.py
           fi
 
       - name: Run SMA20 band levels

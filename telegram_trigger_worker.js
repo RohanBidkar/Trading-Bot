@@ -13,6 +13,7 @@
  *   /bands [YYYY-MM-DD]    SMA20 levels 2.8% either side, every ticker
  *   /fx [YYYY-MM-DD]       the same levels for XAUUSD, ETHUSD, EURUSD, GBPUSD, BTCUSD
  *   /last [YYYY-MM-DD]     ranking over the last 5 trading days
+ *   /moves [YYYY-MM-DD]    year movement: D1 to D400 for every ticker
  *
  * The /start menu also offers "First 5 days": how every ticker did over the
  * opening sessions of a month, chosen from a month grid. Its rolling twin,
@@ -47,6 +48,7 @@ export const LABELS = {
   fxbands: "💱 Forex SMA bands",
   first5: "🗓 First 5 days",
   last5: "⏱ Last 5 days",
+  moves: "📊 Year movement",
 };
 
 // How far back the calendar will navigate. Matches LOOKBACK_HISTORICAL ("2y")
@@ -71,10 +73,12 @@ const COMMANDS = {
   "/forex": "fxbands",
   "/last": "last5",
   "/last5": "last5",
+  "/moves": "moves",
+  "/year": "moves",
 };
 
 // These list every ticker rather than screening, so a run is never silent.
-const ALWAYS_REPORTS = new Set(["first5", "last5", "bands", "fxbands"]);
+const ALWAYS_REPORTS = new Set(["first5", "last5", "bands", "fxbands", "moves"]);
 
 const MAIN_MENU = {
   inline_keyboard: [
@@ -92,6 +96,7 @@ const MAIN_MENU = {
       { text: LABELS.first5, callback_data: "months" },
       { text: LABELS.last5, callback_data: "run:last5" },
     ],
+    [{ text: LABELS.moves, callback_data: "when:moves" }],
   ],
 };
 
@@ -106,7 +111,10 @@ const SCAN_CHOICE_MENU = {
       { text: LABELS.bands, callback_data: "cal:bands" },
       { text: LABELS.fxbands, callback_data: "cal:fxbands" },
     ],
-    [{ text: LABELS.last5, callback_data: "cal:last5" }],
+    [
+      { text: LABELS.last5, callback_data: "cal:last5" },
+      { text: LABELS.moves, callback_data: "cal:moves" },
+    ],
     [{ text: "« Back", callback_data: "menu" }],
   ],
 };
@@ -530,7 +538,8 @@ async function handleMessage(env, message) {
         "Add a date to scan a past session: /scan 2026-09-01\n\n" +
         "/bands lists every ticker with its SMA20 and the prices 2.8% either " +
         "side of it, /fx does the same for XAUUSD, ETHUSD, EURUSD, GBPUSD and " +
-        "BTCUSD, and /last ranks the stocks over the last 5 trading days.\n\n" +
+        "BTCUSD, /last ranks the stocks over the last 5 trading days, and " +
+        "/moves shows every ticker's move over 1 to 400 trading days.\n\n" +
         "The /start menu also has \"First 5 days\" — how every ticker did over " +
         "the opening sessions of a month.",
     );

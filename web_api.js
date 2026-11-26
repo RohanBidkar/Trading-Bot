@@ -46,7 +46,7 @@ const LIST_LIMIT = 40;
 const MAX_RESULT_BYTES = 256 * 1024;
 
 // What each scanner script posts under; "both" posts oversold + overbought.
-const PARTS = new Set(["oversold", "overbought", "bands", "fxbands", "first5", "last5"]);
+const PARTS = new Set(["oversold", "overbought", "bands", "fxbands", "first5", "last5", "moves"]);
 const RUNNER_STATUSES = new Set(["running", "success", "failure", "cancelled"]);
 const RUN_ID = /^[A-Za-z0-9_-]{1,48}$/;
 
